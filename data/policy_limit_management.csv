@@ -1,0 +1,9 @@
+category_type,asset_class,policy_target,range_min,range_max,issuer_limit,sector_limit,target_waci_reduction,description
+Asset_Mix,Fixed Income,0.42,0.2,0.75,0.05,0.4,0.3,Government and Corporate Bonds
+Asset_Mix,Public Equities,0.38,0.2,0.5,0.05,0.25,0.3,Global Developed and EM Stocks
+Asset_Mix,Private Real Estate,0.18,0.0,0.25,0.1,0.3,0.3,Global Real Estate Portfolio
+Asset_Mix,Private Infrastructure,0.07,0.0,0.25,0.1,0.25,0.3,Infrastructure and Essential Services
+Asset_Mix,Private Credit,0.07,0.0,0.25,0.05,0.2,0.3,Corporate and Private Debt
+Asset_Mix,Cash & Funding,-0.12,-0.5,0.0,0.0,0.0,0.0,Repo and Leverage Funding
+Global_Limit,FX_Net_Exposure,0.0,0.0,0.15,0.0,0.0,0.0,Total Non-CAD Net Exposure
+Global_Limit,Funded_Status,1.11,1.0,1.5,0.0,0.0,0.0,Assets over Actuarial Liabilities
