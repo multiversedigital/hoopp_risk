@@ -289,24 +289,17 @@ def _build_issuer_df(assets: pd.DataFrame, total_assets: float) -> pd.DataFrame:
 
 def _build_time_series(df_all: pd.DataFrame) -> pd.DataFrame:
     """
-    对所有日期循环执行 baseline 计算，输出 5 列时间序列:
-        date | funded_status | fx_pct | w_fi | w_eq | w_re
+    对所有日期循环执行 baseline 计算，输出时间序列:
+        date | funded_status | total_assets | total_liabilities | fx_pct | w_fi | w_eq | w_re
 
-    列选择依据（见 engine_design.md 附录 A）:
-        强信号（CV高 + 跨越 threshold，默认画图用）:
-            funded_status  CV=0.8%   跨越 111% target ✓
-            fx_pct         CV=9.1%   跨越 15% limit   ✓  (1/27 breach event)
-        弱信号（波动极小但有 threshold crossing，备用数据）:
-            w_fi           CV=0.3%   在 42% target 附近穿越
-            w_eq           CV=0.5%   在 38% target 附近穿越
-            w_re           CV=0.9%   在 18% target 附近穿越
+    新增列 (Tab1 组合图用):
+        total_assets       — 柱状图资产柱
+        total_liabilities  — 柱状图负债柱
 
-    淘汰的候选 metric（CV<1% 且无 threshold crossing，10天内几乎不动）:
-        total_assets, asset_dur, liability_dur, duration_gap,
-        w_gov, w_tech, w_na, top_issuer_w
-
-    使用方式: Tab 层面按需取列。默认只画 funded_status + fx_pct，
-    如果将来需要 asset_class 权重趋势，数据已在此，无需修改 engine。
+    原有列:
+        funded_status  — 叠加在柱状图上的线
+        fx_pct         — Tab2 用
+        w_fi, w_eq, w_re — 备用数据
     """
     # 预计算 asset_class 权重所需的 class 名
     FI  = 'Fixed Income'
@@ -327,12 +320,14 @@ def _build_time_series(df_all: pd.DataFrame) -> pd.DataFrame:
         class_sums = assets.groupby('asset_class')['mtm_stressed'].sum()
 
         rows.append({
-            'date':           date,
-            'funded_status':  ta / tl if tl != 0 else 0,
-            'fx_pct':         assets['fx_exposure_cad'].sum() / ta if ta != 0 else 0,
-            'w_fi':           class_sums.get(FI, 0) / ta if ta != 0 else 0,
-            'w_eq':           class_sums.get(EQ, 0) / ta if ta != 0 else 0,
-            'w_re':           class_sums.get(RE, 0) / ta if ta != 0 else 0,
+            'date':               date,
+            'funded_status':      ta / tl if tl != 0 else 0,
+            'total_assets':       ta,                              # 新增
+            'total_liabilities':  tl,                              # 新增
+            'fx_pct':             assets['fx_exposure_cad'].sum() / ta if ta != 0 else 0,
+            'w_fi':               class_sums.get(FI, 0) / ta if ta != 0 else 0,
+            'w_eq':               class_sums.get(EQ, 0) / ta if ta != 0 else 0,
+            'w_re':               class_sums.get(RE, 0) / ta if ta != 0 else 0,
         })
 
     return pd.DataFrame(rows)
@@ -341,67 +336,44 @@ def _build_time_series(df_all: pd.DataFrame) -> pd.DataFrame:
 def _build_ai_summary(ctx: dict) -> str:
     """
     把当前快照序列化为 AI prompt 用的字符串。
-    Tab3 AI Advisor 直接把这个 string 塞进 system prompt，不需要自己序列化。
+    Tab5 AI Advisor 直接把这个 string 塞进 system prompt，不需要自己序列化。
 
     格式设计目标: 让 LLM 能一次性理解整个基金状态。
     """
     fs   = ctx['funded_status']
-    sur  = ctx['surplus']
     ta   = ctx['total_assets']
     tl   = ctx['total_liabilities']
-    adur = ctx['asset_dur']
-    ldur = ctx['liability_dur']
+    surp = ctx['surplus']
+    a_d  = ctx['asset_dur']
+    l_d  = ctx['liability_dur']
     fx   = ctx['fx_pct']
-    nfx  = ctx['net_fx_exposure']
 
-    # ── Asset Mix vs Policy ──
-    mix_lines = []
-    for _, row in ctx['comp_df'].iterrows():
-        ac     = row['asset_class']
-        actual = row['current_weight']
-        target = row['policy_target']
-        lo     = row['range_min']
-        hi     = row['range_max']
-        ok     = '✓ OK' if lo <= actual <= hi else '⚠ BREACH'
-        mix_lines.append(
-            f"  {ac:<28} actual {actual:>6.1%} | target {target:>5.0%} | "
-            f"range [{lo:.0%}, {hi:.0%}] → {ok}"
-        )
+    # limits_df 里有 breach 状态
+    limits = ctx['limits_df']
+    breaches = limits[limits['Status'].str.contains('BREACH')]
+    breach_list = breaches['asset_class'].tolist() if len(breaches) > 0 else ['None']
 
-    # ── Limit Status ──
-    fx_status  = '⚠ BREACH' if fx > 0.15 else ('~ WARN' if fx > 0.135 else '✓ OK')
-    top_issuer = ctx['issuer_df']['Weight'].max() if len(ctx['issuer_df']) > 0 else 0
-    iss_status = '⚠ BREACH' if top_issuer > 0.05 else '✓ OK'
+    summary = f"""
+=== HOOPP Fund Snapshot ===
+Date: {ctx['available_dates'][-1] if ctx['available_dates'] else 'N/A'}
 
-    # ── N-Day Trend ──
-    ts = ctx['time_series_df']
-    fs_trend  = ' → '.join(f"{v:.1%}" for v in ts['funded_status'])
-    fx_trend  = ' → '.join(f"{v:.1%}" for v in ts['fx_pct'])
-    fi_trend  = ' → '.join(f"{v:.1%}" for v in ts['w_fi'])
-    eq_trend  = ' → '.join(f"{v:.1%}" for v in ts['w_eq'])
-    re_trend  = ' → '.join(f"{v:.1%}" for v in ts['w_re'])
+Key Metrics:
+- Funded Status: {fs:.1%} (target: 111%)
+- Total Assets: ${ta/1000:.1f}B CAD
+- Total Liabilities: ${tl/1000:.1f}B CAD
+- Surplus: ${surp/1000:.1f}B CAD
+- Asset Duration: {a_d:.1f} yrs
+- Liability Duration: {l_d:.1f} yrs
+- Duration Gap: {a_d - l_d:.1f} yrs
+- FX Exposure: {fx:.1%} (limit: 15%)
 
-    # ── 拼接 ──
-    summary = (
-        f"--- HOOPP Fund Snapshot ({ctx['available_dates'][-1]}) ---\n"
-        f"Funded Status: {fs:.1%} (target: 111%, range: 100%-150%)\n"
-        f"Net Surplus: ${sur/1000:.1f}B\n"
-        f"Total Assets: ${ta/1000:.1f}B | Total Liabilities: ${tl/1000:.1f}B\n"
-        f"Asset Duration: {adur:.1f} yrs | Liability Duration: {ldur:.1f} yrs | "
-        f"Gap: {ldur - adur:.1f} yrs\n"
-        f"\n"
-        f"Asset Mix vs Policy:\n"
-        + '\n'.join(mix_lines) + '\n'
-        f"\n"
-        f"Limit Status:\n"
-        f"  FX Net Exposure: {fx:.1%} (limit: 15%) → {fx_status}\n"
-        f"  Top Issuer Concentration: {top_issuer:.2%} (limit: 5%) → {iss_status}\n"
-        f"\n"
-        f"{len(ts)}-Day Trend:\n"
-        f"  Funded Status:      {fs_trend}\n"
-        f"  FX Exposure:        {fx_trend}\n"
-        f"  Fixed Income w:     {fi_trend}\n"
-        f"  Public Equities w:  {eq_trend}\n"
-        f"  Private RE w:       {re_trend}\n"
-    )
-    return summary
+Compliance Breaches: {', '.join(breach_list)}
+
+Asset Allocation (Top 5 by weight):
+"""
+    # 加上前5个资产类别的权重
+    comp = ctx['comp_df'].nlargest(5, 'current_weight')
+    for _, row in comp.iterrows():
+        summary += f"- {row['asset_class']}: {row['current_weight']:.1%} (target: {row['policy_target']:.1%})\n"
+
+    return summary.strip()
