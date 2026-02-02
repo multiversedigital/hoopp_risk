@@ -256,7 +256,7 @@ def _build_pie_chart(ctx: dict) -> go.Figure:
     """
     资产配置饼图
     - 过滤掉负值 (Cash & Funding 是负的)
-    - 使用统一色阶
+    - 每个 slice 显示 % 和 $金额
     """
     mix_df = ctx['mix_df'].copy()
     
@@ -273,39 +273,33 @@ def _build_pie_chart(ctx: dict) -> go.Figure:
     # 为每个资产类别分配颜色
     colors = [ASSET_COLORS.get(ac, COLORS['accent']) for ac in mix_df['asset_class']]
     
+    # 自定义标签：显示 % 和 $金额
+    custom_text = [
+        f"{row['asset_class']}<br>{row['pct']:.1f}% (${row['total_mtm']/1000:.1f}B)"
+        for _, row in mix_df.iterrows()
+    ]
+    
     fig = go.Figure(data=[
         go.Pie(
             labels=mix_df['asset_class'],
             values=mix_df['total_mtm'],
             marker=dict(
                 colors=colors,
-                line=dict(color=COLORS['bg_page'], width=2)  # 分隔线
+                line=dict(color=COLORS['bg_page'], width=2)
             ),
-            textinfo='label+percent',
+            text=custom_text,
+            textinfo='text',
             textposition='outside',
             textfont=dict(size=11, color=COLORS['text_primary']),
             hovertemplate='%{label}<br>$%{value:,.0f}M<br>%{percent}<extra></extra>',
-            hole=0.45,  # 甜甜圈效果
+            hole=0.4,
             pull=[0.02] * len(mix_df)
         )
     ])
     
-    # 应用统一布局（合并 base 与覆盖项，避免 showlegend 重复）
+    # 应用统一布局 - 不显示中间的总数（合并 base_layout 与 overrides，避免 showlegend 重复）
     base_layout = get_chart_layout(height=320)
-    layout = {
-        **base_layout,
-        'showlegend': False,
-        'margin': dict(l=20, r=20, t=20, b=20),
-        'annotations': [
-            dict(
-                text=f"<b>${total/1000:.0f}B</b>",
-                x=0.5, y=0.5,
-                font_size=20,
-                font_color=COLORS['text_primary'],
-                showarrow=False
-            )
-        ]
-    }
+    layout = {**base_layout, 'showlegend': False, 'margin': dict(l=20, r=20, t=20, b=20)}
     fig.update_layout(**layout)
     
     return fig
@@ -374,7 +368,7 @@ def _build_comparison_bar(ctx: dict) -> go.Figure:
         )
     )
     
-    # 应用统一布局（合并 base 与覆盖项，避免 margin/legend 重复）
+    # 应用统一布局（合并 base_layout 与 overrides，避免 margin 等重复）
     base_layout = get_chart_layout(height=320)
     layout = {
         **base_layout,
