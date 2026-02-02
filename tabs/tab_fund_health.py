@@ -10,6 +10,8 @@ tab_fund_health.py — Tab 1: Fund Health (全基金监控)
     Row 3: 左(饼图) + 右(Actual vs Policy 柱状图)
 
 数据源: 全部从 ctx dict 获取
+
+更新: 使用 ui_components 统一样式
 """
 
 import streamlit as st
@@ -18,21 +20,17 @@ from plotly.subplots import make_subplots
 import pandas as pd
 
 # ============================================================
-# 颜色常量 (与 app.py GLOBAL_CSS 保持一致)
+# 导入统一 UI 组件库
 # ============================================================
-COLOR_BG       = '#0f1923'      # 页面背景
-COLOR_CARD     = '#162232'      # 卡片背景
-COLOR_BORDER   = '#1e3a5f'      # 边框
-COLOR_TEXT     = '#e8edf2'      # 主文字
-COLOR_SUBTEXT  = '#8a9bb0'      # 副文字
-COLOR_ACCENT   = '#00b4d8'      # 主 Accent (冰蓝)
-COLOR_ACCENT2  = '#48cae4'      # 辅 Accent
-COLOR_GREEN    = '#00c9a7'      # 状态绿
-COLOR_ORANGE   = '#f9a825'      # 状态橙 / Target
-COLOR_RED      = '#e74c3c'      # 状态红
-
-# 饼图冰蓝色阶
-PIE_COLORS = ['#00b4d8', '#48cae4', '#0891b2', '#06b6d4', '#22d3ee']
+from ui_components import (
+    COLORS,
+    CHART_COLORS,
+    ASSET_COLORS,
+    get_chart_layout,
+    render_section_header,
+    format_number,
+    format_percent,
+)
 
 
 # ============================================================
@@ -47,16 +45,16 @@ def render(ctx: dict):
     # ─────────────────────────────────────────────────────────
     _render_kpi_cards(ctx)
     
-    st.markdown("<div style='height: 20px'></div>", unsafe_allow_html=True)  # spacer
+    st.markdown("<div style='height: 24px'></div>", unsafe_allow_html=True)
     
     # ─────────────────────────────────────────────────────────
     # Row 2: 组合时间序列图
     # ─────────────────────────────────────────────────────────
-    st.markdown("#### 📈 Assets vs Liabilities Trend")
+    render_section_header("Assets vs Liabilities Trend", "📈")
     fig_ts = _build_combo_time_series(ctx)
     st.plotly_chart(fig_ts, use_container_width=True)
     
-    st.markdown("<div style='height: 10px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height: 16px'></div>", unsafe_allow_html=True)
     
     # ─────────────────────────────────────────────────────────
     # Row 3: 饼图 + 柱状图
@@ -64,12 +62,12 @@ def render(ctx: dict):
     col_left, col_right = st.columns(2)
     
     with col_left:
-        st.markdown("#### 🥧 Asset Allocation")
+        render_section_header("Asset Allocation", "🥧")
         fig_pie = _build_pie_chart(ctx)
         st.plotly_chart(fig_pie, use_container_width=True, config={'displayModeBar': False})
     
     with col_right:
-        st.markdown("#### 📊 Actual vs Policy Target")
+        render_section_header("Actual vs Policy Target", "📊")
         fig_bar = _build_comparison_bar(ctx)
         st.plotly_chart(fig_bar, use_container_width=True, config={'displayModeBar': False})
 
@@ -91,11 +89,9 @@ def _render_kpi_cards(ctx: dict):
     col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
-        # Funded Status 用颜色指示健康度
-        fs_color = COLOR_GREEN if funded_status >= 1.10 else (COLOR_ORANGE if funded_status >= 1.0 else COLOR_RED)
         st.metric(
             label="Funded Status",
-            value=f"{funded_status:.1%}",
+            value=format_percent(funded_status),
             delta="Target: 111%",
             delta_color="off"
         )
@@ -103,15 +99,15 @@ def _render_kpi_cards(ctx: dict):
     with col2:
         st.metric(
             label="Surplus",
-            value=f"${surplus/1000:.1f}B",
-            delta=f"Assets - Liabilities",
+            value=format_number(surplus, prefix="$"),
+            delta="Assets − Liabilities",
             delta_color="off"
         )
     
     with col3:
         st.metric(
             label="Total Assets",
-            value=f"${total_assets/1000:.1f}B",
+            value=format_number(total_assets, prefix="$"),
             delta="CAD",
             delta_color="off"
         )
@@ -125,12 +121,11 @@ def _render_kpi_cards(ctx: dict):
         )
     
     with col5:
-        # Duration Gap 显示正负
         gap_prefix = "+" if duration_gap > 0 else ""
         st.metric(
             label="Duration Gap",
             value=f"{gap_prefix}{duration_gap:.1f} yrs",
-            delta="Asset - Liability",
+            delta="Asset − Liability",
             delta_color="off"
         )
 
@@ -142,7 +137,7 @@ def _render_kpi_cards(ctx: dict):
 def _build_combo_time_series(ctx: dict) -> go.Figure:
     """
     组合图表:
-    - 柱状图: Asset (冰蓝) + Liability (灰蓝) 并排
+    - 柱状图: Asset (靛蓝) + Liability (灰) 并排
     - 线图: Funded Status (绿色) 叠加在右 Y 轴
     - 基准线: 111% target (虚线)
     """
@@ -159,11 +154,9 @@ def _build_combo_time_series(ctx: dict) -> go.Figure:
         go.Bar(
             name='Assets',
             x=ts_df['date_str'],
-            y=ts_df['total_assets'] / 1000,  # 转换为 Billion
-            marker_color=COLOR_ACCENT,
-            opacity=0.85,
-            text=[f"${v/1000:.1f}B" for v in ts_df['total_assets']],
-            textposition='none',
+            y=ts_df['total_assets'] / 1000,
+            marker_color=COLORS['accent'],
+            opacity=0.9,
             hovertemplate='Assets: $%{y:.1f}B<extra></extra>'
         ),
         secondary_y=False
@@ -175,7 +168,7 @@ def _build_combo_time_series(ctx: dict) -> go.Figure:
             name='Liabilities',
             x=ts_df['date_str'],
             y=ts_df['total_liabilities'] / 1000,
-            marker_color=COLOR_SUBTEXT,
+            marker_color=COLORS['text_tertiary'],
             opacity=0.7,
             hovertemplate='Liabilities: $%{y:.1f}B<extra></extra>'
         ),
@@ -187,10 +180,10 @@ def _build_combo_time_series(ctx: dict) -> go.Figure:
         go.Scatter(
             name='Funded Status',
             x=ts_df['date_str'],
-            y=ts_df['funded_status'] * 100,  # 转换为百分比数值
+            y=ts_df['funded_status'] * 100,
             mode='lines+markers',
-            line=dict(color=COLOR_GREEN, width=3),
-            marker=dict(size=8, color=COLOR_GREEN),
+            line=dict(color=COLORS['positive'], width=3),
+            marker=dict(size=8, color=COLORS['positive']),
             hovertemplate='Funded Status: %{y:.1f}%<extra></extra>'
         ),
         secondary_y=True
@@ -200,55 +193,56 @@ def _build_combo_time_series(ctx: dict) -> go.Figure:
     fig.add_hline(
         y=111,
         line_dash="dash",
-        line_color=COLOR_ORANGE,
+        line_color=COLORS['warning'],
         line_width=2,
         annotation_text="111% Target",
         annotation_position="right",
-        annotation_font_color=COLOR_ORANGE,
+        annotation_font_color=COLORS['warning'],
         secondary_y=True
     )
     
-    # ── 布局设置 ──
+    # ── 应用统一布局 ──
+    base_layout = get_chart_layout(height=350)
     fig.update_layout(
+        **base_layout,
         barmode='group',
-        plot_bgcolor=COLOR_BG,
-        paper_bgcolor=COLOR_BG,
-        font=dict(color=COLOR_TEXT, size=12),
         legend=dict(
             orientation="h",
             yanchor="bottom",
             y=1.02,
             xanchor="center",
             x=0.5,
-            font=dict(size=11)
+            font=dict(size=11, color=COLORS['text_secondary'])
         ),
-        margin=dict(l=60, r=60, t=40, b=40),
-        height=350,
-        hovermode='x unified'
     )
     
     # 左 Y 轴 (金额)
     fig.update_yaxes(
         title_text="Amount ($B CAD)",
+        title_font=dict(size=11, color=COLORS['text_tertiary']),
         secondary_y=False,
-        gridcolor=COLOR_BORDER,
+        gridcolor=COLORS['bg_border'],
         tickformat=".0f",
-        range=[100, 130]  # 根据数据范围调整
+        range=[100, 130],
+        tickfont=dict(size=10, color=COLORS['text_tertiary'])
     )
     
     # 右 Y 轴 (百分比)
     fig.update_yaxes(
         title_text="Funded Status (%)",
+        title_font=dict(size=11, color=COLORS['text_tertiary']),
         secondary_y=True,
-        gridcolor='rgba(0,0,0,0)',  # 右轴不画网格线
+        gridcolor='rgba(0,0,0,0)',
         ticksuffix="%",
-        range=[105, 115]  # 留出空间显示 111% 线
+        range=[105, 115],
+        tickfont=dict(size=10, color=COLORS['text_tertiary'])
     )
     
     # X 轴
     fig.update_xaxes(
-        gridcolor=COLOR_BORDER,
-        tickangle=-45
+        gridcolor=COLORS['bg_border'],
+        tickangle=-45,
+        tickfont=dict(size=10, color=COLORS['text_tertiary'])
     )
     
     return fig
@@ -262,7 +256,7 @@ def _build_pie_chart(ctx: dict) -> go.Figure:
     """
     资产配置饼图
     - 过滤掉负值 (Cash & Funding 是负的)
-    - 使用冰蓝色阶
+    - 使用统一色阶
     """
     mix_df = ctx['mix_df'].copy()
     
@@ -276,37 +270,43 @@ def _build_pie_chart(ctx: dict) -> go.Figure:
     # 排序，让最大的在前面
     mix_df = mix_df.sort_values('total_mtm', ascending=False)
     
+    # 为每个资产类别分配颜色
+    colors = [ASSET_COLORS.get(ac, COLORS['accent']) for ac in mix_df['asset_class']]
+    
     fig = go.Figure(data=[
         go.Pie(
             labels=mix_df['asset_class'],
             values=mix_df['total_mtm'],
-            marker=dict(colors=PIE_COLORS[:len(mix_df)]),
+            marker=dict(
+                colors=colors,
+                line=dict(color=COLORS['bg_page'], width=2)  # 分隔线
+            ),
             textinfo='label+percent',
             textposition='outside',
-            textfont=dict(size=11, color=COLOR_TEXT),
+            textfont=dict(size=11, color=COLORS['text_primary']),
             hovertemplate='%{label}<br>$%{value:,.0f}M<br>%{percent}<extra></extra>',
-            hole=0.4,  # 甜甜圈效果
-            pull=[0.02] * len(mix_df)  # 轻微分离效果
+            hole=0.45,  # 甜甜圈效果
+            pull=[0.02] * len(mix_df)
         )
     ])
     
-    fig.update_layout(
-        plot_bgcolor=COLOR_BG,
-        paper_bgcolor=COLOR_BG,
-        font=dict(color=COLOR_TEXT),
-        showlegend=False,  # label 已经在外面显示了
-        margin=dict(l=20, r=20, t=20, b=20),
-        height=320,
-        annotations=[
+    # 应用统一布局（合并 base 与覆盖项，避免 showlegend 重复）
+    base_layout = get_chart_layout(height=320)
+    layout = {
+        **base_layout,
+        'showlegend': False,
+        'margin': dict(l=20, r=20, t=20, b=20),
+        'annotations': [
             dict(
-                text=f"${total/1000:.0f}B",
+                text=f"<b>${total/1000:.0f}B</b>",
                 x=0.5, y=0.5,
-                font_size=18,
-                font_color=COLOR_ACCENT,
+                font_size=20,
+                font_color=COLORS['text_primary'],
                 showarrow=False
             )
         ]
-    )
+    }
+    fig.update_layout(**layout)
     
     return fig
 
@@ -327,7 +327,9 @@ def _build_comparison_bar(ctx: dict) -> go.Figure:
     comp_df = comp_df[comp_df['current_weight'] >= 0].copy()
     
     # 简化 asset_class 名称
-    comp_df['short_name'] = comp_df['asset_class'].apply(lambda x: x.replace('Private ', 'Priv ').replace('Public ', ''))
+    comp_df['short_name'] = comp_df['asset_class'].apply(
+        lambda x: x.replace('Private ', 'Priv ').replace('Public ', '')
+    )
     
     fig = go.Figure()
     
@@ -335,13 +337,13 @@ def _build_comparison_bar(ctx: dict) -> go.Figure:
     for i, row in comp_df.iterrows():
         fig.add_shape(
             type="rect",
-            x0=row['short_name'],
-            x1=row['short_name'],
+            x0=i - 0.4,
+            x1=i + 0.4,
             y0=row['range_min'] * 100,
             y1=row['range_max'] * 100,
             xref="x",
             yref="y",
-            fillcolor='rgba(30,58,95,0.3)',
+            fillcolor=f"rgba({int(COLORS['accent'][1:3], 16)}, {int(COLORS['accent'][3:5], 16)}, {int(COLORS['accent'][5:7], 16)}, 0.1)",
             line=dict(width=0),
             layer="below"
         )
@@ -352,10 +354,10 @@ def _build_comparison_bar(ctx: dict) -> go.Figure:
             name='Actual',
             x=comp_df['short_name'],
             y=comp_df['current_weight'] * 100,
-            marker_color=COLOR_ACCENT,
+            marker_color=COLORS['accent'],
             text=[f"{v*100:.1f}%" for v in comp_df['current_weight']],
             textposition='outside',
-            textfont=dict(size=10),
+            textfont=dict(size=10, color=COLORS['text_secondary']),
             hovertemplate='Actual: %{y:.1f}%<extra></extra>'
         )
     )
@@ -366,35 +368,45 @@ def _build_comparison_bar(ctx: dict) -> go.Figure:
             name='Target',
             x=comp_df['short_name'],
             y=comp_df['policy_target'] * 100,
-            marker_color=COLOR_ORANGE,
+            marker_color=COLORS['warning'],
             opacity=0.7,
             hovertemplate='Target: %{y:.1f}%<extra></extra>'
         )
     )
     
-    fig.update_layout(
-        barmode='group',
-        plot_bgcolor=COLOR_BG,
-        paper_bgcolor=COLOR_BG,
-        font=dict(color=COLOR_TEXT, size=11),
-        legend=dict(
+    # 应用统一布局（合并 base 与覆盖项，避免 margin/legend 重复）
+    base_layout = get_chart_layout(height=320)
+    layout = {
+        **base_layout,
+        'barmode': 'group',
+        'bargap': 0.3,
+        'bargroupgap': 0.1,
+        'legend': dict(
             orientation="h",
             yanchor="bottom",
             y=1.02,
             xanchor="center",
-            x=0.5
+            x=0.5,
+            font=dict(size=11, color=COLORS['text_secondary'])
         ),
-        margin=dict(l=40, r=20, t=40, b=60),
-        height=320,
-        yaxis=dict(
-            title="Weight (%)",
-            gridcolor=COLOR_BORDER,
-            ticksuffix="%",
-            range=[0, 55]
-        ),
-        xaxis=dict(
-            tickangle=-30
-        )
+        'margin': dict(l=50, r=20, t=40, b=80),
+    }
+    fig.update_layout(**layout)
+    
+    # Y 轴
+    fig.update_yaxes(
+        title_text="Weight (%)",
+        title_font=dict(size=11, color=COLORS['text_tertiary']),
+        gridcolor=COLORS['bg_border'],
+        ticksuffix="%",
+        range=[0, 55],
+        tickfont=dict(size=10, color=COLORS['text_tertiary'])
+    )
+    
+    # X 轴
+    fig.update_xaxes(
+        tickangle=-30,
+        tickfont=dict(size=10, color=COLORS['text_tertiary'])
     )
     
     return fig

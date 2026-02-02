@@ -4,30 +4,32 @@ tab_limit_monitor.py — Tab 2: Limit Monitor
 职责:
     展示基金合规限额监控状态
     - KPI 卡片: Total Limits / Breaches / Warnings / FX Exposure
-    - 红绿灯表: 各限额状态
-    - FX Gauge: 外汇敞口仪表盘
-    - Top 5 Issuers: 集中度监控
-    - 时间序列: Funded Status + FX % 双轴图
+    - 红绿灯表 + Top 5 Issuers 并排
+    - FX Gauge + 时间序列并排
+
+布局:
+    Row 1: 4 个 KPI 卡片
+    Row 2: [Limit Status Table] | [Top 5 Issuers Table]  (5:5)
+    Row 3: [FX Gauge] | [Trend Chart]  (4:6)
 
 对外暴露: render(ctx)
+
+更新: 使用 ui_components 统一样式
 """
 
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 # ============================================================
-# 颜色常量 (与 app.py GLOBAL_CSS 保持一致)
+# 导入统一 UI 组件库
 # ============================================================
-COLOR_BG = "#0f1923"
-COLOR_CARD = "#162232"
-COLOR_BORDER = "#1e3a5f"
-COLOR_PRIMARY = "#00b4d8"      # 冰蓝
-COLOR_SECONDARY = "#8a9bb0"    # 灰蓝
-COLOR_OK = "#00c9a7"           # 绿
-COLOR_WARN = "#f9a825"         # 橙
-COLOR_BREACH = "#e74c3c"       # 红
+from ui_components import (
+    COLORS,
+    get_chart_layout,
+    render_section_header,
+    format_percent,
+)
 
 
 def render(ctx: dict):
@@ -53,41 +55,64 @@ def render(ctx: dict):
     c1, c2, c3, c4 = st.columns(4)
 
     with c1:
-        st.metric(label="Total Limits", value=n_total)
+        st.metric(
+            label="No. Limits",
+            value=n_total,
+            delta="—",
+            delta_color="off"
+        )
     with c2:
-        st.metric(label="🔴 Breaches", value=n_breach)
+        st.metric(
+            label="Breaches",
+            value=n_breach,
+            delta="🔴" if n_breach > 0 else "✓",
+            delta_color="inverse" if n_breach > 0 else "off"
+        )
     with c3:
-        st.metric(label="🟡 Warnings", value=n_warn)
+        st.metric(
+            label="Warnings",
+            value=n_warn,
+            delta="🟡" if n_warn > 0 else "✓",
+            delta_color="off"
+        )
     with c4:
-        st.metric(label="FX Exposure", value=f"{fx_pct:.1%}")
+        fx_status = "🔴 Over limit" if fx_pct > 0.15 else "✓ OK"
+        st.metric(
+            label="FX Exposure",
+            value=format_percent(fx_pct),
+            delta=fx_status,
+            delta_color="inverse" if fx_pct > 0.15 else "off"
+        )
 
-    st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height: 24px;'></div>", unsafe_allow_html=True)
 
     # ─────────────────────────────────────────────────────────
-    # Row 2: 左边红绿灯表 + 右边 FX Gauge & Issuer 表
+    # Row 2: Limit Status Table | Top 5 Issuers Table (并排)
     # ─────────────────────────────────────────────────────────
-    col_left, col_right = st.columns([6, 4])
+    col_left, col_right = st.columns(2)
 
     with col_left:
-        st.markdown("#### 📊 Limits Status")
+        render_section_header("Limit Status", "📊")
         _render_limits_table(limits_df)
 
     with col_right:
-        st.markdown("#### 🎯 FX Exposure")
-        _render_fx_gauge(fx_pct)
-
-        st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
-
-        st.markdown("#### 📋 Top 5 Issuers")
+        render_section_header("Top 5 Issuers", "📋")
         _render_issuer_table(issuer_df)
 
-    st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height: 24px;'></div>", unsafe_allow_html=True)
 
     # ─────────────────────────────────────────────────────────
-    # Row 3: 时间序列图 (双Y轴)
+    # Row 3: FX Gauge | Trend Chart (并排)
     # ─────────────────────────────────────────────────────────
-    st.markdown("#### 📈 Trend: Funded Status & FX Exposure")
-    _render_time_series(ts_df)
+    col_gauge, col_trend = st.columns([4, 6])
+
+    with col_gauge:
+        render_section_header("FX Exposure Gauge", "🎯")
+        _render_fx_gauge(fx_pct)
+
+    with col_trend:
+        render_section_header("Trend: FX", "📈")
+        _render_time_series(ts_df)
 
 
 # ============================================================
@@ -109,7 +134,6 @@ def _render_limits_table(limits_df: pd.DataFrame):
     for col in ['Actual', 'Target', 'Min', 'Max']:
         display_df[col] = display_df[col].apply(lambda x: f"{x:.1%}" if abs(x) < 10 else f"{x:.1%}")
 
-    # 用 Streamlit dataframe 显示，带颜色
     st.dataframe(
         display_df,
         use_container_width=True,
@@ -122,52 +146,8 @@ def _render_limits_table(limits_df: pd.DataFrame):
             "Max": st.column_config.TextColumn("Max", width="small"),
             "Status": st.column_config.TextColumn("Status", width="small"),
         },
-        height=320,
+        height=300,
     )
-
-
-def _render_fx_gauge(fx_pct: float):
-    """
-    渲染 FX 敞口仪表盘。
-    阈值: 15%
-    颜色区间: 绿(0-12%), 黄(12-15%), 红(>15%)
-    """
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=fx_pct * 100,  # 转换为百分比数值
-        number={'suffix': '%', 'font': {'size': 36, 'color': COLOR_PRIMARY}},
-        gauge={
-            'axis': {
-                'range': [0, 25],
-                'tickwidth': 1,
-                'tickcolor': COLOR_SECONDARY,
-                'tickfont': {'color': COLOR_SECONDARY},
-            },
-            'bar': {'color': COLOR_PRIMARY, 'thickness': 0.7},
-            'bgcolor': COLOR_CARD,
-            'borderwidth': 1,
-            'bordercolor': COLOR_BORDER,
-            'steps': [
-                {'range': [0, 12], 'color': 'rgba(0, 201, 167, 0.3)'},   # 绿区
-                {'range': [12, 15], 'color': 'rgba(249, 168, 37, 0.3)'}, # 黄区
-                {'range': [15, 25], 'color': 'rgba(231, 76, 60, 0.3)'},  # 红区
-            ],
-            'threshold': {
-                'line': {'color': COLOR_BREACH, 'width': 3},
-                'thickness': 0.8,
-                'value': 15,  # 15% 阈值
-            },
-        },
-    ))
-
-    fig.update_layout(
-        height=180,
-        margin=dict(l=20, r=20, t=30, b=10),
-        paper_bgcolor=COLOR_BG,
-        font={'color': COLOR_SECONDARY},
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_issuer_table(issuer_df: pd.DataFrame):
@@ -183,109 +163,128 @@ def _render_issuer_table(issuer_df: pd.DataFrame):
         display_df,
         use_container_width=True,
         hide_index=True,
-        height=200,
+        column_config={
+            "Issuer": st.column_config.TextColumn("Issuer", width="large"),
+            "Weight": st.column_config.TextColumn("Weight", width="small"),
+            "Status": st.column_config.TextColumn("Status", width="small"),
+        },
+        height=300,
     )
+
+
+def _render_fx_gauge(fx_pct: float):
+    """
+    渲染 FX 敞口仪表盘。
+    阈值: 15%
+    颜色区间: 绿(0-12%), 黄(12-15%), 红(>15%)
+    """
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=fx_pct * 100,
+        number={
+            'suffix': '%',
+            'font': {'size': 42, 'color': COLORS['text_primary'], 'family': 'Inter'}
+        },
+        gauge={
+            'axis': {
+                'range': [0, 25],
+                'tickwidth': 1,
+                'tickcolor': COLORS['text_tertiary'],
+                'tickfont': {'color': COLORS['text_tertiary'], 'size': 10},
+            },
+            'bar': {'color': COLORS['accent'], 'thickness': 0.75},
+            'bgcolor': COLORS['bg_card'],
+            'borderwidth': 1,
+            'bordercolor': COLORS['bg_border'],
+            'steps': [
+                {'range': [0, 12], 'color': f"rgba(16, 185, 129, 0.2)"},    # 绿区
+                {'range': [12, 15], 'color': f"rgba(245, 158, 11, 0.2)"},   # 黄区
+                {'range': [15, 25], 'color': f"rgba(239, 68, 68, 0.2)"},    # 红区
+            ],
+            'threshold': {
+                'line': {'color': COLORS['negative'], 'width': 3},
+                'thickness': 0.85,
+                'value': 15,
+            },
+        },
+    ))
+
+    fig.update_layout(
+        height=250,
+        margin=dict(l=30, r=30, t=40, b=20),
+        paper_bgcolor='rgba(0,0,0,0)',
+        font={'color': COLORS['text_secondary']},
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_time_series(ts_df: pd.DataFrame):
     """
-    渲染双 Y 轴时间序列图:
-    - 左轴: Funded Status (%)
-    - 右轴: FX Exposure (%)
-    - 阈值线: 111% (Funded Status), 15% (FX)
+    渲染 FX 时间序列图:
+    - 单轴: FX Exposure (%)
+    - 阈值线: 15% (FX)
     """
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    fig = go.Figure()
 
-    # ── Funded Status (左轴) ──
+    # 格式化日期
+    ts_df = ts_df.copy()
+    ts_df['date_str'] = pd.to_datetime(ts_df['date']).dt.strftime('%b %d')
+
+    # ── FX Exposure ──
     fig.add_trace(
         go.Scatter(
-            x=ts_df['date'],
-            y=ts_df['funded_status'] * 100,
-            name='Funded Status',
-            line=dict(color=COLOR_PRIMARY, width=2.5),
-            mode='lines+markers',
-            marker=dict(size=6),
-        ),
-        secondary_y=False,
-    )
-
-    # ── FX Exposure (右轴) ──
-    fig.add_trace(
-        go.Scatter(
-            x=ts_df['date'],
+            x=ts_df['date_str'],
             y=ts_df['fx_pct'] * 100,
             name='FX Exposure',
-            line=dict(color=COLOR_SECONDARY, width=2),
+            line=dict(color=COLORS['warning'], width=2),
             mode='lines+markers',
             marker=dict(size=5),
+            hovertemplate='FX: %{y:.1f}%<extra></extra>'
         ),
-        secondary_y=True,
-    )
-
-    # ── 阈值线: Funded Status 111% ──
-    fig.add_hline(
-        y=111,
-        line_dash="dash",
-        line_color=COLOR_OK,
-        line_width=1.5,
-        annotation_text="111% Target",
-        annotation_position="right",
-        annotation_font_color=COLOR_OK,
-        secondary_y=False,
     )
 
     # ── 阈值线: FX 15% ──
     fig.add_hline(
         y=15,
         line_dash="dash",
-        line_color=COLOR_BREACH,
+        line_color=COLORS['negative'],
         line_width=1.5,
-        annotation_text="15% FX Limit",
+        annotation_text="15% Limit",
         annotation_position="right",
-        annotation_font_color=COLOR_BREACH,
-        secondary_y=True,
+        annotation_font_color=COLORS['negative'],
+        annotation_font_size=10,
     )
 
-    # ── 布局设置 ──
+    # ── 应用统一布局 ──
+    base_layout = get_chart_layout(height=250)
     fig.update_layout(
-        height=350,
-        margin=dict(l=10, r=10, t=40, b=40),
-        paper_bgcolor=COLOR_BG,
-        plot_bgcolor=COLOR_BG,
-        font={'color': COLOR_SECONDARY},
+        **base_layout,
         legend=dict(
             orientation="h",
             yanchor="bottom",
             y=1.02,
             xanchor="left",
             x=0,
-            font=dict(size=12),
+            font=dict(size=11, color=COLORS['text_secondary']),
         ),
-        hovermode='x unified',
     )
 
-    # 左 Y 轴
-    fig.update_yaxes(
-        title_text="Funded Status (%)",
-        secondary_y=False,
-        range=[105, 115],
-        gridcolor=COLOR_BORDER,
-        ticksuffix="%",
-    )
-
-    # 右 Y 轴
+    # Y 轴
     fig.update_yaxes(
         title_text="FX Exposure (%)",
-        secondary_y=True,
+        title_font=dict(size=10, color=COLORS['text_tertiary']),
         range=[0, 25],
-        gridcolor=COLOR_BORDER,
+        gridcolor=COLORS['bg_border'],
         ticksuffix="%",
+        tickfont=dict(size=9, color=COLORS['text_tertiary']),
     )
 
     # X 轴
     fig.update_xaxes(
-        gridcolor=COLOR_BORDER,
-        tickformat="%m/%d",
+        gridcolor=COLORS['bg_border'],
+        tickfont=dict(size=9, color=COLORS['text_tertiary']),
+        tickangle=-45,
     )
 
     st.plotly_chart(fig, use_container_width=True)

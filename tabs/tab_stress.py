@@ -3,11 +3,11 @@ tab_stress.py — Tab 3: Stress Testing
 
 职责:
     展示基金在宏观冲击场景下的表现
-    - 预设场景 Dropdown (2008 危机、滞胀、加息等)
-    - 3 个 Slider: Rate / Equity / Inflation
-    - KPI 卡片: Stressed Funded Status / Asset Δ / Liability Δ / Surplus Δ
-    - Waterfall 瀑布图: P&L 按因子分解
-    - Top Movers 表: 涨跌最大的资产
+
+布局:
+    Row 1: Scenario Controls
+           [Preset + Current + Reset] | [Sliders] | [KPIs 2x2]
+    Row 2: [P&L Waterfall] | [Top Movers]
 
 对外暴露: render(ctx)
 """
@@ -16,19 +16,18 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
-# 需要调用 engine 的 calculate_metrics
 import engine
 
 # ============================================================
-# 颜色常量
+# 导入统一 UI 组件库
 # ============================================================
-COLOR_BG = "#0f1923"
-COLOR_CARD = "#162232"
-COLOR_BORDER = "#1e3a5f"
-COLOR_PRIMARY = "#00b4d8"
-COLOR_SECONDARY = "#8a9bb0"
-COLOR_OK = "#00c9a7"
-COLOR_BREACH = "#e74c3c"
+from ui_components import (
+    COLORS,
+    get_chart_layout,
+    render_section_header,
+    format_number,
+    format_percent,
+)
 
 # ============================================================
 # 预设场景
@@ -44,11 +43,41 @@ PRESET_SCENARIOS = {
 
 
 def render(ctx: dict):
-    """
-    Tab 3 主入口。
-    """
+    """Tab 3 主入口。"""
+    
     # ─────────────────────────────────────────────────────────
-    # 从 ctx 取 baseline 数据
+    # 自定义 Slider 样式 (修复红色问题)
+    # ─────────────────────────────────────────────────────────
+    st.markdown(
+        f"""
+        <style>
+        /* Slider 标签 */
+        .stSlider label p {{
+            color: {COLORS['text_secondary']} !important;
+            font-size: 0.85rem !important;
+        }}
+        /* Slider 数值 */
+        .stSlider [data-testid="stThumbValue"] {{
+            color: {COLORS['text_primary']} !important;
+            font-weight: 500 !important;
+            background: transparent !important;
+        }}
+        /* Slider track - 已填充部分 */
+        .stSlider [data-testid="stSliderTrackValue"] {{
+            background-color: {COLORS['accent']} !important;
+        }}
+        /* Slider thumb */
+        .stSlider [role="slider"] {{
+            background-color: {COLORS['accent']} !important;
+            border-color: {COLORS['accent']} !important;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # ─────────────────────────────────────────────────────────
+    # 取 baseline 数据
     # ─────────────────────────────────────────────────────────
     df_day = ctx['df_day']
     baseline_assets = ctx['total_assets']
@@ -57,82 +86,79 @@ def render(ctx: dict):
     baseline_surplus = ctx['surplus']
 
     # ─────────────────────────────────────────────────────────
-    # Row 2 左: Scenario Controls
+    # 标题 + 说明
     # ─────────────────────────────────────────────────────────
-    col_left, col_right = st.columns([0.35, 0.65])
+    render_section_header("Scenario Controls", "🎚️")
+    
+    st.markdown(
+        f"""
+        <div style="color:{COLORS['text_secondary']}; font-size:1rem; line-height:1.5; margin-bottom:16px;">
+            <strong>ℹ️ Methodology note</strong><br/>
+            This demo uses <strong>simplified linear shocks</strong>: parallel moves in rate (bp), equity (%) and inflation (%), 
+            with linear sensitivities (e.g. duration × rate, beta × equity). Suitable for illustration and quick what‑if.
+            In <strong>production</strong>, institutions typically apply <strong>non‑linear factor models</strong> that capture 
+            correlations, tail dependence, volatility regimes and scenario‑dependent behaviour (e.g. credit spread vs rates in stress).
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
+    # ─────────────────────────────────────────────────────────
+    # 3 列布局: [左: Preset+Current+Reset] | [中: Sliders] | [右: KPIs 2x2]
+    # 用单一 session_state["stress"] 存预设和三个值，Reset 只改这个 dict，不碰 widget key，避免报错和卡死
+    # ─────────────────────────────────────────────────────────
+    options = list(PRESET_SCENARIOS.keys())
+    if "stress" not in st.session_state:
+        st.session_state["stress"] = {"preset": "Custom", "rate": 0, "equity": 0, "inflation": 0.0}
+
+    col_left, col_mid, col_right = st.columns([2.5, 3.5, 4])
+
+    # ── 左列: Preset Dropdown ──
     with col_left:
-        st.markdown("#### 🎚️ Scenario Controls")
-
-        # ── 预设场景 Dropdown ──
+        idx = options.index(st.session_state["stress"]["preset"]) if st.session_state["stress"]["preset"] in options else 0
         preset_name = st.selectbox(
             "Preset Scenario",
-            options=list(PRESET_SCENARIOS.keys()),
-            index=0,
-            help="选择预设场景快速填充参数，或选 Custom 手动调节",
+            options=options,
+            index=idx,
         )
-
         preset = PRESET_SCENARIOS[preset_name]
+        # 预设变了则同步三个值
+        if preset_name != st.session_state["stress"]["preset"]:
+            st.session_state["stress"] = {
+                "preset": preset_name,
+                "rate": preset["rate"],
+                "equity": preset["equity"],
+                "inflation": preset["inflation"],
+            }
 
-        st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-
-        # ── Sliders ──
-        # 如果选了预设场景，slider 默认值跟着变
+    # ── 中列: 3 Sliders（用 stress 里的值，不绑 key） ──
+    with col_mid:
         s_rate = st.slider(
-            "Interest Rate Shock (bp)",
-            min_value=-200,
-            max_value=200,
-            value=preset["rate"],
-            step=5,
-            help="+100bp 表示利率上升 1%",
+            "Rate (bp)",
+            min_value=-200, max_value=200,
+            value=st.session_state["stress"]["rate"], step=5,
         )
-
         s_equity = st.slider(
-            "Equity Shock (%)",
-            min_value=-50,
-            max_value=50,
-            value=preset["equity"],
-            step=1,
-            help="-20% 表示股市下跌 20%",
+            "Equity (%)",
+            min_value=-50, max_value=50,
+            value=st.session_state["stress"]["equity"], step=1,
         )
-
         s_inflation = st.slider(
-            "Inflation Shock (%)",
-            min_value=-3.0,
-            max_value=3.0,
-            value=preset["inflation"],
-            step=0.1,
-            format="%.1f",
-            help="+1% 表示通胀预期上升 1%",
+            "Inflation (%)",
+            min_value=-3.0, max_value=3.0,
+            value=st.session_state["stress"]["inflation"], step=0.1, format="%.1f",
         )
-
-        st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-
-        # ── Reset Button ──
-        if st.button("🔄 Reset to Baseline", use_container_width=True):
-            # Streamlit 的 slider 没法直接 reset，但选 Custom 会让 value=0
-            st.rerun()
-
-        # ── 当前场景说明 ──
-        st.markdown(
-            f"""
-            <div style="background-color:{COLOR_CARD}; border:1px solid {COLOR_BORDER}; 
-                        border-radius:8px; padding:12px; margin-top:15px; font-size:0.85rem;">
-            <b style="color:{COLOR_PRIMARY};">Current Scenario:</b><br>
-            Rate: <span style="color:{COLOR_PRIMARY};">{s_rate:+d} bp</span><br>
-            Equity: <span style="color:{COLOR_PRIMARY};">{s_equity:+d}%</span><br>
-            Inflation: <span style="color:{COLOR_PRIMARY};">{s_inflation:+.1f}%</span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    # 用当前滑块值回写，保证下次 rerun 时保持
+    st.session_state["stress"]["rate"] = s_rate
+    st.session_state["stress"]["equity"] = s_equity
+    st.session_state["stress"]["inflation"] = s_inflation
+    st.session_state["stress"]["preset"] = preset_name
 
     # ─────────────────────────────────────────────────────────
     # 执行压力计算
     # ─────────────────────────────────────────────────────────
     df_stressed = engine.calculate_metrics(df_day, s_rate, s_equity, s_inflation)
 
-    # 分离资产和负债
     assets_stressed = df_stressed[df_stressed['plan_category'] == 'Asset']
     liabs_stressed = df_stressed[df_stressed['plan_category'] == 'Liability']
 
@@ -141,59 +167,91 @@ def render(ctx: dict):
     stressed_funded = stressed_assets / stressed_liabilities if stressed_liabilities != 0 else 0
     stressed_surplus = stressed_assets - stressed_liabilities
 
-    # 计算 Delta
     delta_assets = stressed_assets - baseline_assets
     delta_liabilities = stressed_liabilities - baseline_liabilities
     delta_surplus = stressed_surplus - baseline_surplus
+    delta_funded = stressed_funded - baseline_funded
 
-    # ─────────────────────────────────────────────────────────
-    # Row 1: KPI 卡片 (放在最上面，但代码在这里因为需要计算结果)
-    # ─────────────────────────────────────────────────────────
-    # 用 placeholder 在页面顶部插入
-    kpi_placeholder = st.container()
-
-    with kpi_placeholder:
-        k1, k2, k3, k4 = st.columns(4)
-
-        with k1:
+    # ── 右列: KPIs 2x2 ──
+    with col_right:
+        r1c1, r1c2 = st.columns(2)
+        with r1c1:
             st.metric(
-                label="Stressed Funded Status",
-                value=f"{stressed_funded:.1%}",
-                delta=f"{(stressed_funded - baseline_funded):.2%}",
-                delta_color="normal",  # 正=绿，负=红
+                label="Stressed Funded",
+                value=format_percent(stressed_funded),
+                delta=f"{delta_funded:+.2%}",
+                delta_color="normal",
             )
-        with k2:
+        with r1c2:
             st.metric(
                 label="Asset Δ",
-                value=f"${stressed_assets/1000:.1f}B",
-                delta=f"${delta_assets/1000:+.2f}B",
+                value=format_number(stressed_assets, prefix="$"),
+                delta=f"{'+' if delta_assets >= 0 else ''}{delta_assets/1000:.2f}B",
                 delta_color="normal",
             )
-        with k3:
+        
+        r2c1, r2c2 = st.columns(2)
+        with r2c1:
             st.metric(
                 label="Liability Δ",
-                value=f"${stressed_liabilities/1000:.1f}B",
-                delta=f"${delta_liabilities/1000:+.2f}B",
-                delta_color="inverse",  # 负债涨是坏事，所以反转颜色
+                value=format_number(stressed_liabilities, prefix="$"),
+                delta=f"{'+' if delta_liabilities >= 0 else ''}{delta_liabilities/1000:.2f}B",
+                delta_color="inverse",
             )
-        with k4:
+        with r2c2:
             st.metric(
                 label="Surplus Δ",
-                value=f"${stressed_surplus/1000:.1f}B",
-                delta=f"${delta_surplus/1000:+.2f}B",
+                value=format_number(stressed_surplus, prefix="$"),
+                delta=f"{'+' if delta_surplus >= 0 else ''}{delta_surplus/1000:.2f}B",
                 delta_color="normal",
             )
 
+    # ── 左列续: Current Scenario + Reset ──
+    with col_left:
+        impact_color = COLORS['positive'] if delta_surplus >= 0 else COLORS['negative']
+        impact_sign = "+" if delta_surplus >= 0 else ""
+        
+        st.markdown(
+            f"""
+            <div style="background-color:{COLORS['bg_card']}; border:1px solid {COLORS['bg_border']}; 
+                        border-radius:8px; padding:14px; margin-top:12px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <span style="color:{COLORS['text_primary']}; font-weight:600; font-size:0.85rem;">Current Scenario</span>
+                    <span style="background-color:{'rgba(16,185,129,0.15)' if delta_surplus >= 0 else 'rgba(239,68,68,0.15)'}; 
+                                 color:{impact_color}; padding:3px 8px; border-radius:4px; font-size:0.7rem; font-weight:600;">
+                        {impact_sign}${abs(delta_surplus)/1000:.2f}B
+                    </span>
+                </div>
+                <div style="color:{COLORS['text_secondary']}; font-size:0.8rem; line-height:1.6;">
+                    Rate: <span style="color:{COLORS['accent']}; font-weight:500;">{s_rate:+d} bp</span><br>
+                    Equity: <span style="color:{COLORS['accent']}; font-weight:500;">{s_equity:+d}%</span><br>
+                    Inflation: <span style="color:{COLORS['accent']}; font-weight:500;">{s_inflation:+.1f}%</span>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
+
+        if st.button("🔄 Reset to Baseline", use_container_width=True):
+            st.session_state["stress"] = dict(PRESET_SCENARIOS["Custom"])
+            st.session_state["stress"]["preset"] = "Custom"
+            st.rerun()
+
+    st.markdown("<div style='height: 24px;'></div>", unsafe_allow_html=True)
+
     # ─────────────────────────────────────────────────────────
-    # Row 2 右: Waterfall + Top Movers
+    # Row 2: Waterfall + Top Movers 并排
     # ─────────────────────────────────────────────────────────
-    with col_right:
-        st.markdown("#### 📊 P&L Waterfall (Assets)")
+    col_waterfall, col_movers = st.columns(2)
+
+    with col_waterfall:
+        render_section_header("P&L Waterfall (Assets)", "📊")
         _render_waterfall(df_day, assets_stressed, baseline_assets, s_rate, s_equity, s_inflation)
 
-        st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
-
-        st.markdown("#### 📋 Top Movers")
+    with col_movers:
+        render_section_header("Top Movers", "📋")
         _render_top_movers(df_day, assets_stressed)
 
 
@@ -201,89 +259,49 @@ def render(ctx: dict):
 # 私有渲染函数
 # ============================================================
 
-def _render_waterfall(df_day: pd.DataFrame, 
-                      assets_stressed: pd.DataFrame,
-                      baseline_assets: float,
-                      s_rate: int, s_equity: int, s_inflation: float):
-    """
-    渲染 P&L 瀑布图，按因子分解。
-    """
-    # 只取资产部分计算
+def _render_waterfall(df_day, assets_stressed, baseline_assets, s_rate, s_equity, s_inflation):
+    """渲染 P&L 瀑布图"""
     assets_baseline = df_day[df_day['plan_category'] == 'Asset']
 
-    # 分别计算每个因子的独立 P&L 贡献
     rate_pnl = (assets_baseline['market_exposure_cad'] * 
                 (-assets_baseline['duration'] * s_rate / 10000)).sum()
-
     equity_pnl = (assets_baseline['market_exposure_cad'] * 
                   (assets_baseline['equity_beta'] * s_equity / 100)).sum()
-
     inflation_pnl = (assets_baseline['market_exposure_cad'] * 
                      (assets_baseline['inflation_beta'] * s_inflation / 100)).sum()
-
     final_assets = assets_stressed['mtm_stressed'].sum()
 
-    # 构建瀑布图数据
-    stages = ['Baseline', 'Rate Impact', 'Equity Impact', 'Inflation Impact', 'Final']
+    stages = ['Baseline', 'Rate', 'Equity', 'Inflation', 'Final']
     values = [baseline_assets, rate_pnl, equity_pnl, inflation_pnl, final_assets]
 
-    # 确定颜色
-    colors = []
-    for i, v in enumerate(values):
-        if i == 0:
-            colors.append(COLOR_SECONDARY)  # Baseline: 灰
-        elif i == len(values) - 1:
-            colors.append(COLOR_PRIMARY)    # Final: 冰蓝
-        elif v >= 0:
-            colors.append(COLOR_OK)         # Positive: 绿
-        else:
-            colors.append(COLOR_BREACH)     # Negative: 红
-
-    # Plotly Waterfall
     fig = go.Figure(go.Waterfall(
         name="P&L",
         orientation="v",
         measure=["absolute", "relative", "relative", "relative", "total"],
         x=stages,
         y=values,
-        connector={"line": {"color": COLOR_BORDER}},
-        decreasing={"marker": {"color": COLOR_BREACH}},
-        increasing={"marker": {"color": COLOR_OK}},
-        totals={"marker": {"color": COLOR_PRIMARY}},
+        connector={"line": {"color": COLORS['bg_border'], "width": 1}},
+        decreasing={"marker": {"color": COLORS['negative']}},
+        increasing={"marker": {"color": COLORS['positive']}},
+        totals={"marker": {"color": COLORS['accent']}},
         textposition="outside",
         text=[f"${v/1000:.1f}B" if abs(v) > 500 else f"${v:.0f}M" for v in values],
-        textfont={"color": COLOR_SECONDARY, "size": 11},
+        textfont={"color": COLORS['text_secondary'], "size": 10},
     ))
 
-    fig.update_layout(
-        height=280,
-        margin=dict(l=10, r=10, t=30, b=40),
-        paper_bgcolor=COLOR_BG,
-        plot_bgcolor=COLOR_BG,
-        font={'color': COLOR_SECONDARY},
-        showlegend=False,
-        waterfallgap=0.3,
-    )
-
-    fig.update_xaxes(
-        tickfont=dict(size=11),
-        gridcolor=COLOR_BORDER,
-    )
-
-    fig.update_yaxes(
-        tickformat="$,.0f",
-        ticksuffix="M",
-        gridcolor=COLOR_BORDER,
-    )
+    base_layout = get_chart_layout(height=320)
+    base_layout["showlegend"] = False
+    base_layout["margin"] = dict(l=20, r=20, t=20, b=40)
+    fig.update_layout(**base_layout, waterfallgap=0.4)
+    fig.update_xaxes(tickfont=dict(size=10, color=COLORS['text_tertiary']), gridcolor=COLORS['bg_border'])
+    fig.update_yaxes(tickformat="$,.0f", ticksuffix="M", gridcolor=COLORS['bg_border'],
+                     tickfont=dict(size=9, color=COLORS['text_tertiary']))
 
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_top_movers(df_day: pd.DataFrame, assets_stressed: pd.DataFrame):
-    """
-    渲染 Top Movers 表：5 biggest gains + 5 biggest losses。
-    """
-    # 合并 baseline 和 stressed 数据
+def _render_top_movers(df_day, assets_stressed):
+    """渲染 Top Movers 表"""
     baseline_assets = df_day[df_day['plan_category'] == 'Asset'][['asset_name', 'asset_class', 'mtm_cad']].copy()
     stressed_mtm = assets_stressed[['asset_name', 'mtm_stressed']].copy()
 
@@ -291,21 +309,16 @@ def _render_top_movers(df_day: pd.DataFrame, assets_stressed: pd.DataFrame):
     merged['pnl'] = merged['mtm_stressed'] - merged['mtm_cad']
     merged['pnl_pct'] = merged['pnl'] / merged['mtm_cad'].abs() * 100
 
-    # 排序找 top 5 gains 和 top 5 losses
     top_gains = merged.nlargest(5, 'pnl')
     top_losses = merged.nsmallest(5, 'pnl')
-
-    # 合并并排序
     top_movers = pd.concat([top_gains, top_losses]).sort_values('pnl', ascending=False)
 
-    # 准备显示 DataFrame
     display_df = top_movers[['asset_name', 'asset_class', 'mtm_cad', 'mtm_stressed', 'pnl', 'pnl_pct']].copy()
-    display_df.columns = ['Asset', 'Class', 'Baseline ($M)', 'Stressed ($M)', 'P&L ($M)', 'P&L %']
+    display_df.columns = ['Asset', 'Class', 'Baseline', 'Stressed', 'P&L', 'P&L %']
 
-    # 格式化
-    display_df['Baseline ($M)'] = display_df['Baseline ($M)'].apply(lambda x: f"{x:,.0f}")
-    display_df['Stressed ($M)'] = display_df['Stressed ($M)'].apply(lambda x: f"{x:,.0f}")
-    display_df['P&L ($M)'] = display_df['P&L ($M)'].apply(lambda x: f"{x:+,.0f}")
+    display_df['Baseline'] = display_df['Baseline'].apply(lambda x: f"${x:,.0f}M")
+    display_df['Stressed'] = display_df['Stressed'].apply(lambda x: f"${x:,.0f}M")
+    display_df['P&L'] = display_df['P&L'].apply(lambda x: f"${x:+,.0f}M")
     display_df['P&L %'] = display_df['P&L %'].apply(lambda x: f"{x:+.1f}%")
 
     st.dataframe(
@@ -314,11 +327,11 @@ def _render_top_movers(df_day: pd.DataFrame, assets_stressed: pd.DataFrame):
         hide_index=True,
         height=320,
         column_config={
-            "Asset": st.column_config.TextColumn("Asset", width="large"),
-            "Class": st.column_config.TextColumn("Class", width="medium"),
-            "Baseline ($M)": st.column_config.TextColumn("Baseline", width="small"),
-            "Stressed ($M)": st.column_config.TextColumn("Stressed", width="small"),
-            "P&L ($M)": st.column_config.TextColumn("P&L", width="small"),
+            "Asset": st.column_config.TextColumn("Asset", width="medium"),
+            "Class": st.column_config.TextColumn("Class", width="small"),
+            "Baseline": st.column_config.TextColumn("Baseline", width="small"),
+            "Stressed": st.column_config.TextColumn("Stressed", width="small"),
+            "P&L": st.column_config.TextColumn("P&L", width="small"),
             "P&L %": st.column_config.TextColumn("P&L %", width="small"),
         },
     )

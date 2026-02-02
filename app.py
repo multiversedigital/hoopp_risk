@@ -27,6 +27,10 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+
+from ui_components import GLOBAL_CSS, COLORS, get_chart_layout
+st.markdown(GLOBAL_CSS, unsafe_allow_html=True) 
+
 # ============================================================
 # 2. 全局 CSS
 # ============================================================
@@ -118,8 +122,6 @@ h4 {
 </style>
 """
 
-st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
-
 # ============================================================
 # 3. 数据加载（缓存）
 # ============================================================
@@ -200,13 +202,12 @@ from tabs.tab_ai_copilot import render as render_ai_copilot
 from tabs.tab_pipeline import render as render_data_pipeline
    
 
-
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📊 Fund Health",
     "🚦 Limit Monitor",
     "🌪️ Stress Testing",
     "🤖 AI Copilot",
-    "🔧 Data Pipeline",
+    "🔧 Data Control(Pipeline)",
 ])
 
 with tab1:
@@ -217,6 +218,4 @@ with tab3:
     render_stress(ctx)
 with tab4:
     render_ai_copilot(ctx)
-with tab5:
-    render_data_pipeline(ctx)
 
