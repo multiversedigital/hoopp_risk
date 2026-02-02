@@ -97,17 +97,19 @@ def _render_kpi_cards(ctx: dict):
         )
     
     with col2:
+        # 数据以 M 为单位存储，转换为 B 显示
         st.metric(
             label="Surplus",
-            value=format_number(surplus, prefix="$"),
+            value=f"${surplus/1000:.1f}B",
             delta="Assets − Liabilities",
             delta_color="off"
         )
     
     with col3:
+        # 数据以 M 为单位存储，转换为 B 显示
         st.metric(
             label="Total Assets",
-            value=format_number(total_assets, prefix="$"),
+            value=f"${total_assets/1000:.1f}B",
             delta="CAD",
             delta_color="off"
         )
@@ -364,6 +366,9 @@ def _build_comparison_bar(ctx: dict) -> go.Figure:
             y=comp_df['policy_target'] * 100,
             marker_color=COLORS['warning'],
             opacity=0.7,
+            text=[f"{v*100:.1f}%" for v in comp_df['policy_target']],
+            textposition='outside',
+            textfont=dict(size=10, color=COLORS['text_secondary']),
             hovertemplate='Target: %{y:.1f}%<extra></extra>'
         )
     )

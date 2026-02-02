@@ -49,35 +49,26 @@ def load_data():
 df_all, df_policy = load_data()
 
 # ============================================================
-# 4. Sidebar (方案 C: 深色侧边栏 + HOOPP Logo)
+# 4. Sidebar (方案 C: 深色侧边栏 + 文字 Logo)
 # ============================================================
 
 with st.sidebar:
-    # ── Logo 区域 (居中) ──
-    logo_path = Path(__file__).resolve().parent / "assets" / "hoopp_logo.png"
-    
-    if logo_path.exists():
-        # 使用 HOOPP 官方 Logo - 居中显示
-        col1, col2, col3 = st.columns([0.5, 3, 0.5])
-        with col2:
-            st.image(str(logo_path), width=180)
-    else:
-        # Fallback: 文字 Logo
-        st.markdown(
-            """
-            <div style="text-align: center; padding: 20px 0 10px 0;">
-                <span style="font-size: 2rem; font-weight: 700; color: #00843D;">🌳</span>
-                <br>
-                <span style="font-size: 1.3rem; font-weight: 700; color: #e2e8f0;">HOOPP</span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    # ── 文字 Logo (避免版权问题) ──
+    st.markdown(
+        """
+        <div style="text-align: center; padding: 20px 0 10px 0;">
+            <span style="font-size: 2.5rem;">🌳</span>
+            <br>
+            <span style="font-size: 1.5rem; font-weight: 700; color: #00843D; letter-spacing: 2px;">HOOPP</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     
     # ── 副标题 ──
     st.markdown(
         """
-        <div style="text-align: center; margin-top: 8px; margin-bottom: 20px;">
+        <div style="text-align: center; margin-top: 4px; margin-bottom: 20px;">
             <span style="color: #94a3b8; font-size: 0.75rem; font-weight: 500; letter-spacing: 1px; text-transform: uppercase;">
                 AI Powered Risk Reporting & Monitoring
             </span>
@@ -127,7 +118,7 @@ with st.sidebar:
                 </li>
                 <li style="margin-bottom: 6px;">
                     <span style="color: #64748b;">AI Engine:</span><br>
-                    <span style="color: #e2e8f0; padding-left: 8px;">GPT-4o (Azure OpenAI)</span>
+                    <span style="color: #e2e8f0; padding-left: 8px;">GPT-4o （OpenAI API）</span>
                 </li>
             </ul>
         </div>
@@ -158,22 +149,23 @@ ctx = engine.build_context(df_all, df_policy, selected_date)
 # 6. Tab 渲染
 # ============================================================
 
-from tabs.tab_fund_health import render as render_fund_health
+from tabs.tab_funding_status import render as render_funding_status
 from tabs.tab_limit_monitor import render as render_limit_monitor
 from tabs.tab_stress import render as render_stress
 from tabs.tab_ai_copilot import render as render_ai_copilot
-from tabs.tab_pipeline import render as render_data_pipeline
+from tabs.tab_data_governance import render as render_data_governance
+
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📊 Fund Health",
+    "📊 Funding Status",
     "🚦 Limit Monitor",
     "🎚️ Stress Testing",
     "🤖 AI Copilot",
-    "🔧 Data Control(in pipeline)",
+    "🛡️ Data Governance (in pipeline)",
 ])
 
 with tab1:
-    render_fund_health(ctx)
+    render_funding_status(ctx)
 
 with tab2:
     render_limit_monitor(ctx)
@@ -183,3 +175,20 @@ with tab3:
 
 with tab4:
     render_ai_copilot(ctx)
+
+with tab5:
+    render_data_governance(ctx)
+
+
+
+
+
+
+
+
+
+
+
+
+
+

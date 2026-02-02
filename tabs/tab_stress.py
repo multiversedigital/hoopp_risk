@@ -185,7 +185,7 @@ def render(ctx: dict):
         with r1c2:
             st.metric(
                 label="Asset Δ",
-                value=format_number(stressed_assets, prefix="$"),
+                value=f"${stressed_assets/1000:.1f}B",
                 delta=f"{'+' if delta_assets >= 0 else ''}{delta_assets/1000:.2f}B",
                 delta_color="normal",
             )
@@ -194,14 +194,14 @@ def render(ctx: dict):
         with r2c1:
             st.metric(
                 label="Liability Δ",
-                value=format_number(stressed_liabilities, prefix="$"),
+                value=f"${stressed_liabilities/1000:.1f}B",
                 delta=f"{'+' if delta_liabilities >= 0 else ''}{delta_liabilities/1000:.2f}B",
                 delta_color="inverse",
             )
         with r2c2:
             st.metric(
                 label="Surplus Δ",
-                value=format_number(stressed_surplus, prefix="$"),
+                value=f"${stressed_surplus/1000:.1f}B",
                 delta=f"{'+' if delta_surplus >= 0 else ''}{delta_surplus/1000:.2f}B",
                 delta_color="normal",
             )
