@@ -113,7 +113,7 @@ def _render_kpi_cards(ctx: dict):
             delta="CAD",
             delta_color="off"
         )
-    
+"""   
     with col4:
         st.metric(
             label="Asset Duration",
@@ -130,7 +130,7 @@ def _render_kpi_cards(ctx: dict):
             delta="Asset − Liability",
             delta_color="off"
         )
-
+"""
 
 # ============================================================
 # PRIVATE: 组合时间序列图 (柱状 + 线)
