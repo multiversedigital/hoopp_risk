@@ -1,425 +1,371 @@
 """
-tab_ai_copilot.py — Tab 5: AI Copilot
+tab_ai_copilot.py — Tab 4: AI Copilot (Decoupled UI Layer)
 
-职责:
-    智能风险顾问，基于 OpenAI GPT-4 提供自然语言交互
-
-布局:
-    1. Daily Analysis (模板 或 AI 生成)
-    2. 输入框 (居中)
-    3. Quick Questions
-    4. Conversation (页面底部)
+设计理念:
+    - UI 与逻辑完全分离
+    - 本文件只负责渲染，不包含业务逻辑
+    - 核心 Agent 逻辑在 agent_logic.py (可独立测试)
 
 对外暴露: render(ctx)
 """
 
 import streamlit as st
-from openai import OpenAI
-from datetime import datetime
+from ui_components import COLORS, render_section_header
 
 # ============================================================
-# 导入统一 UI 组件库
+# 从 agent_logic 导入核心功能 (解耦的关键)
 # ============================================================
-from ui_components import (
-    COLORS,
-    render_section_header,
+from agent_logic import (
+    run_agent,
+    build_system_prompt,
+    ThinkingStep,
+    COMPLIANCE_LIMITS,
 )
+
 
 # ============================================================
 # 预设问题
 # ============================================================
 QUICK_QUESTIONS = {
-    "📊 Rate": "Which assets are most sensitive to interest rate changes? List the top 5 by duration.",
-    "⚠️ Risks": "What are the top 3 risks in today's portfolio that I should focus on?",
-    "🚦 Limits": "Summarize today's limit breaches and warnings. Which ones need immediate attention?",
-    "🥧 Alloc": "How does our current asset allocation compare to policy targets?",
+    "📊 Snapshot": "Give me a quick snapshot of our current risk metrics - funded status, duration gap, and any concerns.",
+    "⚠️ Limits": "Check all risk limits and highlight any breaches or warnings that need immediate attention.",
+    "🎚️ Stress": "Run a stress test with rates up 100bp and equity down 15%. What's the impact?",
+    "🛡️ Hedge 85%": "I want to increase our duration hedge ratio to 85%. Check if this is compliant.",
+    "📈 Rates": "Which assets are most sensitive to interest rate changes?",
 }
 
 
+# ============================================================
+# 主渲染函数
+# ============================================================
+
 def render(ctx: dict):
-    """Tab 5 主入口。"""
+    """Tab 4 主入口 - 纯 UI 渲染"""
     
-    # ─────────────────────────────────────────────────────────
-    # 自定义样式
-    # ─────────────────────────────────────────────────────────
+    # ── 初始化 Session State ──
+    if 'chat_history' not in st.session_state:
+        st.session_state.chat_history = []
+    if 'thinking_steps' not in st.session_state:
+        st.session_state.thinking_steps = []
+
+    # ── 检查 API Key ──
+    api_key = _get_api_key()
+
+    # ── 构建 System Prompt (调用 agent_logic) ──
+    system_prompt = build_system_prompt(ctx)
+
+    # ── 布局: 左侧聊天 (2/3) + 右侧思考面板 (1/3) ──
+    col_main, col_thinking = st.columns([2, 1])
+    
+    with col_main:
+        _render_status_summary(ctx)
+        st.markdown("<div style='height: 16px;'></div>", unsafe_allow_html=True)
+        
+        _render_quick_questions(api_key, system_prompt, ctx)
+        st.markdown("<div style='height: 16px;'></div>", unsafe_allow_html=True)
+        
+        _render_chat_section(api_key, system_prompt, ctx)
+    
+    with col_thinking:
+        _render_thinking_panel()
+
+
+# ============================================================
+# UI 组件: 状态摘要
+# ============================================================
+
+def _render_status_summary(ctx: dict):
+    """渲染风险状态摘要"""
+    render_section_header("Portfolio Status", "📋")
+    
+    funded_status = ctx['funded_status']
+    surplus = ctx['surplus']
+    fx_pct = ctx['fx_pct']
+    duration_gap = ctx['asset_dur'] - ctx['liability_dur']
+    
+    limits_df = ctx['limits_df']
+    breaches = len(limits_df[limits_df['Status'].str.contains('BREACH', na=False)])
+    warnings = len(limits_df[limits_df['Status'].str.contains('WARN', na=False)])
+
+    # 状态判断
+    if breaches > 0:
+        status_icon, status_text, status_color = "🔴", f"{breaches} BREACH", COLORS['negative']
+    elif warnings > 0:
+        status_icon, status_text, status_color = "🟡", f"{warnings} WARNING", COLORS['warning']
+    else:
+        status_icon, status_text, status_color = "🟢", "ALL OK", COLORS['positive']
+
     st.markdown(
         f"""
-        <style>
-        /* Daily Analysis 卡片 */
-        .analysis-card {{
+        <div style="
             background-color: {COLORS['bg_card']};
             border: 1px solid {COLORS['bg_border']};
             border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 16px;
-        }}
-        .analysis-card.ai-generated {{
-            border-left: 3px solid {COLORS['accent']};
-        }}
-        .ai-badge {{
-            display: inline-block;
-            background-color: rgba(99, 102, 241, 0.15);
-            color: {COLORS['accent']};
-            padding: 4px 10px;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            margin-bottom: 12px;
-        }}
-        .analysis-content {{
-            color: {COLORS['text_secondary']};
-            font-size: 0.9rem;
-            line-height: 1.7;
-        }}
-        .analysis-timestamp {{
-            color: {COLORS['text_tertiary']};
-            font-size: 0.75rem;
-            text-align: right;
-            margin-top: 12px;
-        }}
-        /* Chat 样式 */
-        .stChatMessage {{
-            background-color: {COLORS['bg_card']} !important;
-            border: 1px solid {COLORS['bg_border']} !important;
-            border-radius: 8px !important;
-        }}
-        /* 空状态 */
-        .empty-state {{
-            color: {COLORS['text_tertiary']};
-            text-align: center;
-            padding: 40px 20px;
-        }}
-        .empty-state p {{
-            margin: 8px 0;
-        }}
-        </style>
+            padding: 16px;
+        ">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <span style="font-weight: 600; color: {COLORS['text_primary']};">Risk Dashboard</span>
+                <span style="
+                    background-color: {status_color}20;
+                    color: {status_color};
+                    padding: 4px 12px;
+                    border-radius: 16px;
+                    font-size: 0.8rem;
+                    font-weight: 600;
+                ">{status_icon} {status_text}</span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
+                <div style="text-align: center;">
+                    <div style="color: {COLORS['text_tertiary']}; font-size: 0.75rem;">Funded</div>
+                    <div style="color: {COLORS['positive']}; font-size: 1.1rem; font-weight: 600;">{funded_status:.1%}</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="color: {COLORS['text_tertiary']}; font-size: 0.75rem;">Surplus</div>
+                    <div style="color: {COLORS['text_primary']}; font-size: 1.1rem; font-weight: 600;">${surplus/1000:.1f}B</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="color: {COLORS['text_tertiary']}; font-size: 0.75rem;">Duration Gap</div>
+                    <div style="color: {COLORS['text_primary']}; font-size: 1.1rem; font-weight: 600;">{duration_gap:.1f} yrs</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="color: {COLORS['text_tertiary']}; font-size: 0.75rem;">FX Exp</div>
+                    <div style="color: {COLORS['warning'] if fx_pct > 0.12 else COLORS['text_primary']}; font-size: 1.1rem; font-weight: 600;">{fx_pct:.1%}</div>
+                </div>
+            </div>
+        </div>
         """,
         unsafe_allow_html=True,
     )
 
-    # ─────────────────────────────────────────────────────────
-    # 初始化 Session State
-    # ─────────────────────────────────────────────────────────
-    if 'chat_history' not in st.session_state:
-        st.session_state.chat_history = []
-    if 'ai_analysis' not in st.session_state:
-        st.session_state.ai_analysis = None
-    if 'ai_analysis_time' not in st.session_state:
-        st.session_state.ai_analysis_time = None
-
-    # ─────────────────────────────────────────────────────────
-    # 检查 API Key
-    # ─────────────────────────────────────────────────────────
-    api_key_available = _check_api_key()
-
-    # ─────────────────────────────────────────────────────────
-    # 构建 System Prompt
-    # ─────────────────────────────────────────────────────────
-    system_prompt = _build_system_prompt(ctx)
-
-    # ─────────────────────────────────────────────────────────
-    # Section 1: Daily Analysis
-    # ─────────────────────────────────────────────────────────
-    _render_daily_analysis(ctx, api_key_available, system_prompt)
-
-    st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
-
-    # ─────────────────────────────────────────────────────────
-    # Section 2: Input Box (居中)
-    # ─────────────────────────────────────────────────────────
-    _render_chat_input(api_key_available, system_prompt)
-
-    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
-
-    # ─────────────────────────────────────────────────────────
-    # Section 3: Quick Questions
-    # ─────────────────────────────────────────────────────────
-    _render_quick_questions(api_key_available, system_prompt)
-
-    st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
-
-    # ─────────────────────────────────────────────────────────
-    # Section 4: Conversation (底部)
-    # ─────────────────────────────────────────────────────────
-    _render_conversation()
-
 
 # ============================================================
-# Daily Analysis
+# UI 组件: 快速问题
 # ============================================================
 
-def _render_daily_analysis(ctx: dict, api_key_available: bool, system_prompt: str):
-    """渲染 Daily Analysis 区域"""
+def _render_quick_questions(api_key: str, system_prompt: str, ctx: dict):
+    """渲染快速问题按钮"""
+    render_section_header("Quick Actions", "⚡")
     
-    # 标题行：标题 + 按钮
-    col_title, col_btn = st.columns([8, 2])
+    cols = st.columns(5)
     
-    with col_title:
-        render_section_header("Daily Analysis", "📋")
-    
-    with col_btn:
-        if st.session_state.ai_analysis:
-            # 已有 AI 分析，显示 Refresh 按钮
-            if st.button("🔄 Refresh", use_container_width=True, disabled=not api_key_available):
-                _generate_ai_analysis(ctx, system_prompt)
-                st.rerun()
-        else:
-            # 还没有 AI 分析，显示生成按钮
-            if st.button("✨ AI Insights", use_container_width=True, disabled=not api_key_available):
-                _generate_ai_analysis(ctx, system_prompt)
-                st.rerun()
-
-    # 内容区域
-    if st.session_state.ai_analysis:
-        # 显示 AI 生成的分析
-        st.markdown(
-            f"""
-            <div class="analysis-card ai-generated">
-                <span class="ai-badge">✨ AI Generated</span>
-                <div class="analysis-content">
-                    {st.session_state.ai_analysis}
-                </div>
-                <div class="analysis-timestamp">
-                    Generated: {st.session_state.ai_analysis_time}
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    else:
-        # 显示模板生成的摘要
-        summary = _generate_template_summary(ctx)
-        st.markdown(
-            f"""
-            <div class="analysis-card">
-                <div class="analysis-content">
-                    {summary}
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-def _generate_template_summary(ctx: dict) -> str:
-    """生成模板摘要 (不调用 API)"""
-    limits_df = ctx['limits_df']
-    n_breach = len(limits_df[limits_df['Status'].str.contains('BREACH')])
-    n_warn = len(limits_df[limits_df['Status'].str.contains('WARN')])
-
-    # 欢迎语
-    welcome_text = "Hello Team, this is your AI Copilot. Click <b>[✨ AI Insights]</b> above to generate today's portfolio analysis."
-    
-    # Alerts
-    if n_breach > 0:
-        alert_text = f"⚠️ <b>{n_breach} limit breach(es)</b> require attention."
-    elif n_warn > 0:
-        alert_text = f"🟡 <b>{n_warn} warning(s)</b> to monitor."
-    else:
-        alert_text = "✅ No limit breaches or warnings today."
-
-    return f"{welcome_text}<br><br>{alert_text}"
-
-
-def _generate_ai_analysis(ctx: dict, system_prompt: str):
-    """调用 GPT 生成深度分析"""
-    try:
-        client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-        
-        prompt = """Based on the portfolio data provided, give a concise daily risk briefing for a pension fund risk manager.
-
-Structure your response as:
-1. **Overall Status** - One sentence on fund health
-2. **Key Observations** - 2-3 bullet points on the most important things to note today
-3. **Watch Items** - Any metrics approaching limits or concerns
-
-Keep it under 150 words. Be specific with numbers. Professional tone."""
-
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=300,
-            temperature=0.3,
-        )
-        
-        # 存储结果
-        st.session_state.ai_analysis = response.choices[0].message.content
-        st.session_state.ai_analysis_time = datetime.now().strftime("%b %d, %I:%M %p")
-        
-    except Exception as e:
-        st.session_state.ai_analysis = f"❌ Error generating analysis: {str(e)}"
-        st.session_state.ai_analysis_time = datetime.now().strftime("%b %d, %I:%M %p")
-
-
-# ============================================================
-# Chat Input
-# ============================================================
-
-def _render_chat_input(api_key_available: bool, system_prompt: str):
-    """渲染输入框"""
-    if not api_key_available:
-        st.warning("⚠️ OpenAI API key not configured. Add `OPENAI_API_KEY` to `.streamlit/secrets.toml`")
-        st.chat_input("Ask about risks, limits, duration...", disabled=True)
-        return
-
-    user_input = st.chat_input("Ask about risks, limits, duration, allocation...")
-
-    if user_input:
-        _handle_user_input(user_input, system_prompt)
-        st.rerun()
-
-
-# ============================================================
-# Quick Questions
-# ============================================================
-
-def _render_quick_questions(api_key_available: bool, system_prompt: str):
-    """渲染 Quick Questions + Clear 按钮"""
-    
-    st.markdown(
-        f"<p style='color:{COLORS['text_tertiary']}; font-size:0.85rem; margin-bottom:8px;'>Try asking:</p>",
-        unsafe_allow_html=True,
-    )
-    
-    cols = st.columns([1, 1, 1, 1, 1.2])
-    
-    questions = list(QUICK_QUESTIONS.items())
-    for i, (label, question) in enumerate(questions):
+    for i, (label, question) in enumerate(QUICK_QUESTIONS.items()):
         with cols[i]:
-            if st.button(label, use_container_width=True, disabled=not api_key_available):
-                _handle_user_input(question, system_prompt)
+            disabled = not api_key
+            if st.button(label, use_container_width=True, disabled=disabled, key=f"quick_{i}"):
+                _process_user_input(question, system_prompt, ctx, api_key)
                 st.rerun()
-    
-    # Clear 按钮
-    with cols[4]:
-        if st.button("🗑️ Clear Chat", help="Clear chat history", use_container_width=True):
-            st.session_state.chat_history = []
-            st.rerun()
 
 
 # ============================================================
-# Conversation
+# UI 组件: 聊天区域
 # ============================================================
 
-def _render_conversation():
-    """渲染对话历史 (最新在上)"""
-    render_section_header("Conversation", "🗨️")
+def _render_chat_section(api_key: str, system_prompt: str, ctx: dict):
+    """渲染聊天区域"""
+    render_section_header("Conversation", "💬")
     
-    chat_container = st.container(height=300)
-
+    # 聊天历史
+    chat_container = st.container(height=280)
     with chat_container:
         if not st.session_state.chat_history:
             st.markdown(
-                """
-                <div class="empty-state">
-                    <p style="font-size:1rem;">💬 No conversation yet</p>
-                    <p style="font-size:0.85rem;">Ask a question above to start chatting</p>
+                f"""
+                <div style="color: {COLORS['text_tertiary']}; text-align: center; padding: 30px 20px;">
+                    <p style="font-size: 1rem; margin-bottom: 8px;">👋 Welcome to AI Risk Advisor</p>
+                    <p style="font-size: 0.85rem;">Ask about risk metrics, run stress tests, or propose hedging strategies.</p>
+                    <p style="font-size: 0.8rem; color: {COLORS['accent']}; margin-top: 12px;">
+                        💡 Try "Hedge 85%" to see the Audit Loop in action!
+                    </p>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
         else:
-            # 倒序显示，最新的在上面
-            for message in reversed(st.session_state.chat_history):
+            for message in st.session_state.chat_history:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
+    
+    # 输入区域
+    if not api_key:
+        st.warning("⚠️ OpenAI API key not configured. Add `OPENAI_API_KEY` to `.streamlit/secrets.toml`")
+        st.chat_input("Type your question...", disabled=True)
+        return
+
+    col_input, col_clear = st.columns([6, 1])
+    
+    with col_clear:
+        if st.button("🗑️", use_container_width=True, help="Clear conversation"):
+            st.session_state.chat_history = []
+            st.session_state.thinking_steps = []
+            st.rerun()
+
+    user_input = st.chat_input("Ask about risk, stress tests, or hedging strategies...")
+
+    if user_input:
+        _process_user_input(user_input, system_prompt, ctx, api_key)
+        st.rerun()
+
+
+# ============================================================
+# UI 组件: 思考面板 (Thinking Panel)
+# ============================================================
+
+def _render_thinking_panel():
+    """渲染思考过程面板"""
+    st.markdown(
+        f"""
+        <div style="
+            background-color: {COLORS['bg_card']};
+            border: 1px solid {COLORS['bg_border']};
+            border-radius: 8px;
+            padding: 16px;
+            min-height: 450px;
+        ">
+            <div style="
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 16px;
+                padding-bottom: 12px;
+                border-bottom: 1px solid {COLORS['bg_border']};
+            ">
+                <span style="font-size: 0.95rem; font-weight: 600; color: {COLORS['text_primary']};">
+                    🧠 Agent Thinking
+                </span>
+                <span style="
+                    font-size: 0.7rem;
+                    color: {COLORS['accent']};
+                    background-color: {COLORS['accent']}15;
+                    padding: 2px 8px;
+                    border-radius: 4px;
+                ">Audit Loop</span>
+            </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    
+    if not st.session_state.thinking_steps:
+        st.markdown(
+            f"""
+            <div style="color: {COLORS['text_tertiary']}; font-size: 0.85rem; padding: 20px; text-align: center;">
+                <p style="margin-bottom: 12px;">Agent workflow will appear here.</p>
+                <div style="font-size: 0.75rem; line-height: 1.8; text-align: left; padding: 0 10px;">
+                    <p>🔍 <strong>Analyze</strong> → Understand intent</p>
+                    <p>⚙️ <strong>Calculate</strong> → Run risk engine</p>
+                    <p>🛡️ <strong>Audit</strong> → Check compliance</p>
+                    <p>🔄 <strong>Refine</strong> → Auto-correct if needed</p>
+                    <p>💬 <strong>Respond</strong> → Generate answer</p>
+                </div>
+                <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid {COLORS['bg_border']};">
+                    <p style="font-size: 0.7rem; color: {COLORS['text_tertiary']};">
+                        Max Hedge: {COMPLIANCE_LIMITS['max_hedge_ratio']:.0%} | 
+                        Max FX: {COMPLIANCE_LIMITS['max_fx_exposure']:.0%}
+                    </p>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        for step in st.session_state.thinking_steps:
+            _render_thinking_step(step)
+    
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def _render_thinking_step(step: ThinkingStep):
+    """渲染单个思考步骤"""
+    status_config = {
+        "running": {"icon": "⏳", "color": COLORS['warning'], "bg": f"{COLORS['warning']}15"},
+        "success": {"icon": "✅", "color": COLORS['positive'], "bg": f"{COLORS['positive']}15"},
+        "warning": {"icon": "⚠️", "color": COLORS['warning'], "bg": f"{COLORS['warning']}15"},
+        "error": {"icon": "❌", "color": COLORS['negative'], "bg": f"{COLORS['negative']}15"},
+    }
+    
+    config = status_config.get(step.status, status_config["running"])
+    
+    detail_html = ""
+    if step.detail:
+        detail_html = f"<div style='font-size: 0.75rem; color: {COLORS['text_tertiary']}; margin-top: 4px; font-style: italic;'>{step.detail}</div>"
+    
+    st.markdown(
+        f"""
+        <div style="
+            background-color: {config['bg']};
+            border-left: 3px solid {config['color']};
+            border-radius: 4px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+        ">
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span>{config['icon']}</span>
+                <span style="font-size: 0.85rem; font-weight: 600; color: {COLORS['text_primary']};">{step.node}</span>
+            </div>
+            <div style="font-size: 0.8rem; color: {COLORS['text_secondary']}; margin-top: 4px;">
+                {step.message}
+            </div>
+            {detail_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ============================================================
+# 核心处理函数 (调用 agent_logic)
+# ============================================================
+
+def _process_user_input(user_input: str, system_prompt: str, ctx: dict, api_key: str):
+    """
+    处理用户输入 - 调用解耦的 agent_logic
+    
+    这里只做:
+    1. 更新 session state
+    2. 调用 run_agent()
+    3. 保存结果
+    """
+    # 添加用户消息
+    st.session_state.chat_history.append({"role": "user", "content": user_input})
+    
+    # 清空之前的思考步骤
+    st.session_state.thinking_steps = []
+    
+    try:
+        # ========================================
+        # 核心调用 - agent_logic.run_agent()
+        # ========================================
+        response, thinking_steps = run_agent(
+            user_query=user_input,
+            ctx=ctx,
+            system_prompt=system_prompt,
+            api_key=api_key,
+        )
+        
+        # 保存思考步骤
+        st.session_state.thinking_steps = thinking_steps
+        
+        # 添加助手响应
+        st.session_state.chat_history.append({"role": "assistant", "content": response})
+
+    except Exception as e:
+        st.session_state.thinking_steps.append(ThinkingStep(
+            node="❌ Error",
+            status="error",
+            message=str(e),
+        ))
+        st.session_state.chat_history.append({
+            "role": "assistant",
+            "content": f"I apologize, but I encountered an error: {str(e)}",
+        })
 
 
 # ============================================================
 # 辅助函数
 # ============================================================
 
-def _check_api_key() -> bool:
-    """检查 OpenAI API Key 是否配置"""
+def _get_api_key() -> str:
+    """获取 API Key"""
     try:
-        api_key = st.secrets.get("OPENAI_API_KEY", None)
-        return api_key is not None and len(api_key) > 10
-    except Exception:
-        return False
-
-
-def _build_system_prompt(ctx: dict) -> str:
-    """构建 System Prompt"""
-    funded_status = ctx['funded_status']
-    total_assets = ctx['total_assets']
-    total_liabilities = ctx['total_liabilities']
-    surplus = ctx['surplus']
-    asset_dur = ctx['asset_dur']
-    liability_dur = ctx['liability_dur']
-    duration_gap = asset_dur - liability_dur
-    fx_pct = ctx['fx_pct']
-
-    comp_df = ctx['comp_df']
-    allocation_str = comp_df[['asset_class', 'current_weight', 'policy_target']].to_string(index=False)
-
-    limits_df = ctx['limits_df']
-    limits_str = limits_df[['asset_class', 'current_weight', 'range_min', 'range_max', 'Status']].to_string(index=False)
-
-    issuer_df = ctx['issuer_df']
-    issuer_str = issuer_df.to_string(index=False)
-
-    return f"""You are a Risk Advisor for HOOPP (Healthcare of Ontario Pension Plan), a $124B Canadian defined benefit pension fund.
-
-=== CURRENT PORTFOLIO SNAPSHOT ===
-
-Key Metrics:
-- Funded Status: {funded_status:.1%} (Target: 111%)
-- Total Assets: ${total_assets/1000:.1f}B
-- Total Liabilities: ${total_liabilities/1000:.1f}B
-- Surplus: ${surplus/1000:.1f}B
-- Asset Duration: {asset_dur:.1f} years
-- Liability Duration: {liability_dur:.1f} years
-- Duration Gap: {duration_gap:.1f} years
-- FX Exposure: {fx_pct:.1%} (Limit: 15%)
-
-Asset Allocation:
-{allocation_str}
-
-Limit Status:
-{limits_str}
-
-Top 5 Issuers:
-{issuer_str}
-
-=== INSTRUCTIONS ===
-1. Answer based ONLY on the data above
-2. Be concise and professional
-3. Use bullet points for lists
-4. Include units ($B, %, years, bp)
-5. Highlight risks and actionable insights
-Keep responses under 200 words unless more detail requested."""
-
-
-def _handle_user_input(user_input: str, system_prompt: str):
-    """处理用户输入"""
-    st.session_state.chat_history.append({
-        "role": "user",
-        "content": user_input,
-    })
-
-    try:
-        client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-        
-        messages = [{"role": "system", "content": system_prompt}]
-        messages.extend(st.session_state.chat_history[-20:])
-
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            max_tokens=500,
-            temperature=0.3,
-        )
-
-        st.session_state.chat_history.append({
-            "role": "assistant",
-            "content": response.choices[0].message.content,
-        })
-
-    except Exception as e:
-        st.session_state.chat_history.append({
-            "role": "assistant",
-            "content": f"❌ Error: {str(e)}",
-        })
+        return st.secrets.get("OPENAI_API_KEY", "")
+    except:
+        return ""

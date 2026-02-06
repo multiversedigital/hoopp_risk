@@ -153,30 +153,34 @@ from tabs.tab_funding_status import render as render_funding_status
 from tabs.tab_limit_monitor import render as render_limit_monitor
 from tabs.tab_stress import render as render_stress
 from tabs.tab_ai_copilot import render as render_ai_copilot
+from tabs.tab_ai_copilot_lg import render as render_ai_copilot_langgraph
+from tabs.tab_ai_copilot_gov import render as render_ai_copilot_gov
 from tabs.tab_data_governance import render as render_data_governance
 
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📊 Funding Status",
     "🚦 Limit Monitor",
     "🎚️ Stress Testing",
     "🤖 AI Copilot",
+    "🤖 AI Copilot (LangGraph)",
+    "🤖 AI Copilot (Governance)",
     "🛡️ Data Governance (in pipeline)",
 ])
-
 with tab1:
     render_funding_status(ctx)
-
 with tab2:
     render_limit_monitor(ctx)
-
 with tab3:
     render_stress(ctx)
-
 with tab4:
     render_ai_copilot(ctx)
-
 with tab5:
+    render_ai_copilot_langgraph(ctx)
+with tab6:
+    render_ai_copilot_gov(ctx)
+with tab7:
     render_data_governance(ctx)
 
 
