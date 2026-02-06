@@ -59,7 +59,7 @@ with st.sidebar:
         <div style="text-align: center; padding: 20px 0 10px 0;">
             <span style="font-size: 2.5rem;">🌳</span>
             <br>
-            <span style="font-size: 1.5rem; font-weight: 700; color: #00843D; letter-spacing: 2px;">HOOPP</span>
+            <span style="font-size: 1.5rem; font-weight: 700; color: #00843D; letter-spacing: 2px;">Genesis Alpha</span>
         </div>
         """,
         unsafe_allow_html=True,
@@ -96,7 +96,7 @@ with st.sidebar:
     
     st.markdown("<hr style='border-color: #1e293b; margin: 20px 0 16px 0;'>", unsafe_allow_html=True)
     
-    # ── System Configuration (机构风格) ──
+    # ── System Configuration (机构风格) ── Synthetic HOOPP Portfolio -->Synthetic Portfolio
     num_positions = len(df_all[df_all["timestamp"] == selected_date])
     
     st.markdown(
@@ -106,7 +106,7 @@ with st.sidebar:
             <ul style="padding-left: 0; margin-top: 10px; line-height: 1.9; list-style-type: none;">
                 <li style="margin-bottom: 6px;">
                     <span style="color: #64748b;">Data Source:</span><br>
-                    <span style="color: #e2e8f0; padding-left: 8px;">Synthetic HOOPP Portfolio</span>
+                    <span style="color: #e2e8f0; padding-left: 8px;">Synthetic Portfolio</span>
                 </li>
                 <li style="margin-bottom: 6px;">
                     <span style="color: #64748b;">Data Coverage:</span><br>
