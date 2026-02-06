@@ -31,11 +31,11 @@ from agent_logic_gov import (
 # 节点状态消息映射
 # ============================================================
 NODE_STATUS_MESSAGES = {
-    "analyze": ("🤖", "AI 正在分析意图并选择工具...", "Tool Selection"),
-    "execute": ("⚙️", "正在执行风险计算工具...", "Tool Execution"),
-    "audit": ("🛡️", "正在进行合规审计...", "Compliance Audit"),
-    "respond": ("💬", "正在生成响应...", "Response Generation"),
-    "handle_approval": ("✅", "正在处理审批结果...", "Approval Processing"),
+    "analyze": ("🤖", "AI analyzing intent and selecting tool...", "Tool Selection"),
+    "execute": ("⚙️", "Executing risk calculation tool...", "Tool Execution"),
+    "audit": ("🛡️", "Running compliance audit...", "Compliance Audit"),
+    "respond": ("💬", "Generating response...", "Response Generation"),
+    "handle_approval": ("✅", "Processing approval result...", "Approval Processing"),
 }
 
 
@@ -43,7 +43,7 @@ NODE_STATUS_MESSAGES = {
 # 预设问题
 # ============================================================
 QUICK_QUESTIONS = {
-    "📊 Metrics": "What are our current risk metrics?",
+    "📊 Summary": "Give me a summary of our current risk position.",
     "⚠️ Limits": "Check limit breaches and warnings",
     "🎚️ Stress": "Run stress test: rates +100bp, equity -15%",
     "🛡️ Hedge 85%": "I want to increase hedge ratio to 85%",
@@ -238,7 +238,7 @@ def _render_chat_section(api_key: str, ctx: dict):
 
     # 如果有待审批任务，禁用输入
     if st.session_state.gov_pending_approval:
-        st.info("⏳ 请先处理待审批任务")
+        st.info("⏳ Please process pending approval first")
         st.chat_input("Waiting for approval...", disabled=True)
         return
 
@@ -262,7 +262,7 @@ def _render_chat_section(api_key: str, ctx: dict):
 # ============================================================
 
 def _render_approval_card(ctx: dict, api_key: str):
-    """渲染审批卡片"""
+    """Render approval card"""
     pending = st.session_state.gov_pending_approval
     
     st.markdown(
@@ -276,7 +276,7 @@ def _render_approval_card(ctx: dict, api_key: str):
         ">
             <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
                 <span style="font-size: 1.5rem;">🚨</span>
-                <span style="font-size: 1.1rem; font-weight: 700; color: #ff6b6b;">需要人工审批</span>
+                <span style="font-size: 1.1rem; font-weight: 700; color: #ff6b6b;">Approval Required</span>
             </div>
             <div style="
                 background-color: {COLORS['bg_card']};
@@ -286,33 +286,33 @@ def _render_approval_card(ctx: dict, api_key: str):
             ">
                 <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; text-align: center;">
                     <div>
-                        <div style="color: {COLORS['text_tertiary']}; font-size: 0.75rem;">建议比例</div>
+                        <div style="color: {COLORS['text_tertiary']}; font-size: 0.75rem;">Proposed</div>
                         <div style="color: #ff6b6b; font-size: 1.3rem; font-weight: 700;">{pending['proposed_ratio']:.0%}</div>
                     </div>
                     <div>
-                        <div style="color: {COLORS['text_tertiary']}; font-size: 0.75rem;">合规限额</div>
+                        <div style="color: {COLORS['text_tertiary']}; font-size: 0.75rem;">Limit</div>
                         <div style="color: {COLORS['text_primary']}; font-size: 1.3rem; font-weight: 700;">{pending['max_allowed']:.0%}</div>
                     </div>
                     <div>
-                        <div style="color: {COLORS['text_tertiary']}; font-size: 0.75rem;">系统建议</div>
+                        <div style="color: {COLORS['text_tertiary']}; font-size: 0.75rem;">Recommended</div>
                         <div style="color: {COLORS['positive']}; font-size: 1.3rem; font-weight: 700;">{pending['recommendation']:.0%}</div>
                     </div>
                 </div>
             </div>
             <div style="color: {COLORS['text_secondary']}; font-size: 0.85rem; margin-bottom: 12px;">
-                {pending.get('reason', '建议的对冲比例超出合规限额，需要人工决策。')}
+                {pending.get('reason', 'Proposed hedge ratio exceeds compliance limit. Human decision required.')}
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
     
-    # 审批按钮
+    # Approval buttons
     col1, col2, col3 = st.columns([1, 1, 1])
     
     with col1:
         if st.button(
-            f"✅ 批准调整至 {pending['recommendation']:.0%}",
+            f"✅ Approve ({pending['recommendation']:.0%})",
             type="primary",
             use_container_width=True,
             key="gov_approve",
@@ -321,7 +321,7 @@ def _render_approval_card(ctx: dict, api_key: str):
     
     with col2:
         if st.button(
-            "❌ 驳回此操作",
+            "❌ Reject",
             type="secondary",
             use_container_width=True,
             key="gov_reject",
@@ -330,7 +330,7 @@ def _render_approval_card(ctx: dict, api_key: str):
     
     with col3:
         st.markdown(
-            f"<div style='text-align: center; padding-top: 8px; color: {COLORS['text_tertiary']}; font-size: 0.75rem;'>操作将记录至审计日志</div>",
+            f"<div style='text-align: center; padding-top: 8px; color: {COLORS['text_tertiary']}; font-size: 0.75rem;'>Action will be logged to audit trail</div>",
             unsafe_allow_html=True,
         )
 
@@ -509,7 +509,7 @@ def _process_user_input_with_status(user_input: str, ctx: dict, api_key: str):
     status_placeholder = st.empty()
     
     try:
-        with status_placeholder.status("🛡️ Governance Engine 启动中...", expanded=True) as status:
+        with status_placeholder.status("🛡️ Governance Engine running...", expanded=True) as status:
             final_response = ""
             requires_approval = False
             approval_context = {}
@@ -537,7 +537,7 @@ def _process_user_input_with_status(user_input: str, ctx: dict, api_key: str):
                 # 检查是否需要审批
                 if state.get("requires_approval"):
                     requires_approval = True
-                    st.warning("🚨 **触发合规拦截** — 需要人工审批")
+                    st.warning("🚨 **Compliance Intercept** — Approval required")
                 
                 # 收集结果
                 if "thinking_steps" in state:
@@ -549,7 +549,7 @@ def _process_user_input_with_status(user_input: str, ctx: dict, api_key: str):
                 
                 time.sleep(0.1)
             
-            status.update(label="✅ 执行完成", state="complete", expanded=False)
+            status.update(label="✅ Complete", state="complete", expanded=False)
         
         # 添加响应到聊天
         st.session_state.gov_chat_history.append({

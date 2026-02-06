@@ -25,49 +25,49 @@ from langchain_core.tools import tool
 # ============================================================
 
 class HedgeComplianceInput(BaseModel):
-    """对冲合规检查的输入参数"""
+    """Input parameters for hedge compliance check"""
     ratio: float = Field(
         ...,
-        description="建议的对冲比例，范围 0.0-1.0（例如 0.85 表示 85%）",
+        description="Proposed hedge ratio, range 0.0-1.0 (e.g., 0.85 means 85%)",
         ge=0.0,
         le=1.0,
     )
     hedge_type: Literal["duration", "fx", "equity"] = Field(
         default="duration",
-        description="对冲类型：duration(久期对冲)、fx(外汇对冲)、equity(权益对冲)",
+        description="Hedge type: duration, fx, or equity",
     )
     
     @field_validator('ratio')
     @classmethod
     def validate_ratio(cls, v):
         if v < 0 or v > 1:
-            raise ValueError('对冲比例必须在 0-1 之间')
+            raise ValueError('Hedge ratio must be between 0 and 1')
         return v
 
 
 class StressTestInput(BaseModel):
-    """压力测试的输入参数"""
+    """Input parameters for stress test"""
     rate_shock_bp: int = Field(
         default=100,
-        description="利率冲击幅度（基点），正数表示加息，负数表示降息",
+        description="Interest rate shock in basis points, positive for rate hike, negative for rate cut",
         ge=-500,
         le=500,
     )
     equity_shock_pct: float = Field(
         default=-0.15,
-        description="股票冲击幅度（百分比），例如 -0.15 表示下跌 15%",
+        description="Equity shock as percentage, e.g., -0.15 means -15%",
         ge=-0.50,
         le=0.50,
     )
     inflation_shock_pct: float = Field(
         default=0.0,
-        description="通胀冲击幅度（百分比）",
+        description="Inflation shock as percentage",
         ge=-0.10,
         le=0.10,
     )
     scenario_name: str = Field(
         default="Custom Scenario",
-        description="场景名称，用于报告标识",
+        description="Scenario name for reporting",
     )
 
 
@@ -216,7 +216,7 @@ def check_hedge_compliance(
     hedge_type: str = "duration",
 ) -> dict:
     """
-    检查对冲方案是否符合 HOOPP 的合规限额要求。
+    检查对冲方案是否符合 the fund 的合规限额要求。
     
     使用场景:
         - 用户想"把对冲比例提高到 85%"
@@ -251,20 +251,20 @@ def check_hedge_compliance(
             "proposed_ratio": ratio,
             "max_allowed": max_ratio,
             "hedge_type": hedge_type,
-            "message": f"对冲比例 {ratio:.0%} 在限额 {max_ratio:.0%} 内，合规通过",
+            "message": f"Hedge ratio {ratio:.0%} is within limit ({max_ratio:.0%}), compliant",
             "recommendation": None,
             "requires_approval": False,
         }
     else:
-        compliant_ratio = max_ratio * 0.95  # 留 5% buffer
+        compliant_ratio = max_ratio * 0.95  # 5% buffer
         return {
             "status": "FAIL",
             "proposed_ratio": ratio,
             "max_allowed": max_ratio,
             "hedge_type": hedge_type,
-            "message": f"对冲比例 {ratio:.0%} 超出限额 {max_ratio:.0%}，需要人工审批",
+            "message": f"Hedge ratio {ratio:.0%} exceeds limit ({max_ratio:.0%}), approval required",
             "recommendation": compliant_ratio,
-            "recommendation_message": f"建议调整至 {compliant_ratio:.0%}（限额的 95%）",
+            "recommendation_message": f"Recommended adjustment to {compliant_ratio:.0%} (95% of limit)",
             "requires_approval": True,
         }
 
@@ -371,14 +371,14 @@ def get_all_tools() -> List:
 
 def get_tool_descriptions() -> dict:
     """
-    获取所有工具的描述（用于 UI 展示）
+    Get tool descriptions for UI display
     """
     return {
-        "get_risk_metrics": "📊 获取核心风险指标",
-        "run_stress_test": "🎚️ 执行压力测试",
-        "check_hedge_compliance": "🛡️ 检查对冲合规",
-        "get_limit_status": "⚠️ 查询限额状态",
-        "get_asset_allocation": "📈 获取资产配置",
+        "get_risk_metrics": "📊 Get Risk Metrics",
+        "run_stress_test": "🎚️ Run Stress Test",
+        "check_hedge_compliance": "🛡️ Check Hedge Compliance",
+        "get_limit_status": "⚠️ Get Limit Status",
+        "get_asset_allocation": "📈 Get Asset Allocation",
     }
 
 

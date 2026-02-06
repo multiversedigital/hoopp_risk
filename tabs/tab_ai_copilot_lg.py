@@ -25,11 +25,11 @@ from agent_logic_lg import (
 # 节点状态消息映射
 # ============================================================
 NODE_STATUS_MESSAGES = {
-    "analyze": ("🔍", "正在解析您的风控意图...", "Intent Analysis"),
-    "calculate": ("⚙️", "正在调用 Risk Engine 计算...", "Risk Calculation"),
-    "audit": ("🛡️", "正在对照 HOOPP 限额进行合规审计...", "Compliance Audit"),
-    "refine": ("🔄", "检测到合规风险！系统正在强制介入修正...", "Auto Refinement"),
-    "respond": ("💬", "正在生成智能响应...", "Response Generation"),
+    "analyze": ("🔍", "Analyzing risk intent...", "Intent Analysis"),
+    "calculate": ("⚙️", "Calling Risk Engine...", "Risk Calculation"),
+    "audit": ("🛡️", "Running compliance audit...", "Compliance Audit"),
+    "refine": ("🔄", "Compliance risk detected! Auto-correcting...", "Auto Refinement"),
+    "respond": ("💬", "Generating response...", "Response Generation"),
 }
 
 
@@ -37,7 +37,7 @@ NODE_STATUS_MESSAGES = {
 # 预设问题
 # ============================================================
 QUICK_QUESTIONS = {
-    "📊 Snapshot": "Give me a quick snapshot of our current risk metrics.",
+    "📊 Summary": "Give me a summary of our current risk position.",
     "⚠️ Limits": "Check all risk limits and highlight any breaches.",
     "🎚️ Stress": "Run a stress test with rates up 100bp and equity down 15%.",
     "🛡️ Hedge 85%": "I want to increase our duration hedge ratio to 85%.",
@@ -389,7 +389,7 @@ def _process_user_input_with_status(user_input: str, system_prompt: str, ctx: di
     status_placeholder = st.empty()
     
     try:
-        with status_placeholder.status("🧠 LangGraph Engine 正在调度...", expanded=True) as status:
+        with status_placeholder.status("🧠 LangGraph Engine running...", expanded=True) as status:
             final_response = ""
             
             for node_name, state, is_final in run_agent_stream(
@@ -413,7 +413,7 @@ def _process_user_input_with_status(user_input: str, system_prompt: str, ctx: di
                 # 检查是否审计失败
                 audit_result = state.get("audit_result", {})
                 if node_name == "audit" and audit_result.get("status") == "FAIL":
-                    st.warning("🚨 **合规检查失败！** 系统正在自动修正...")
+                    st.warning("🚨 **Compliance Failed!** Auto-correcting...")
                 
                 # 收集思考步骤
                 if "thinking_steps" in state:
@@ -427,7 +427,7 @@ def _process_user_input_with_status(user_input: str, system_prompt: str, ctx: di
                 time.sleep(0.1)
             
             # 完成状态
-            status.update(label="✅ 执行完成", state="complete", expanded=False)
+            status.update(label="✅ Complete", state="complete", expanded=False)
         
         # 添加助手响应
         st.session_state.lg_chat_history.append({

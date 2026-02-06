@@ -175,7 +175,7 @@ def _execute_check_hedge_compliance(
             "proposed_ratio": ratio,
             "max_allowed": max_ratio,
             "hedge_type": hedge_type,
-            "message": f"对冲比例 {ratio:.0%} 在限额 {max_ratio:.0%} 内，合规通过",
+            "message": f"Hedge ratio {ratio:.0%} is within limit ({max_ratio:.0%})",
             "recommendation": None,
             "requires_approval": False,
         }
@@ -186,9 +186,9 @@ def _execute_check_hedge_compliance(
             "proposed_ratio": ratio,
             "max_allowed": max_ratio,
             "hedge_type": hedge_type,
-            "message": f"对冲比例 {ratio:.0%} 超出限额 {max_ratio:.0%}，需要人工审批",
+            "message": f"Hedge ratio {ratio:.0%} exceeds limit ({max_ratio:.0%}), approval required",
             "recommendation": compliant_ratio,
-            "recommendation_message": f"建议调整至 {compliant_ratio:.0%}（限额的 95%）",
+            "recommendation_message": f"Recommended adjustment: {compliant_ratio:.0%} (95% of limit)",
             "requires_approval": True,
         }
 
@@ -242,17 +242,17 @@ def node_analyze_with_tools(state: AgentState) -> AgentState:
     """
     steps = list(state.get("thinking_steps", []))
     
-    # 构建工具选择 prompt
+    # Build tool selection prompt
     tools_description = """
 Available Tools:
-1. get_risk_metrics - 获取核心风险指标（funded status, surplus, duration gap）
-2. run_stress_test - 执行压力测试（利率冲击、股票冲击）
-3. check_hedge_compliance - 检查对冲方案合规性（重要：超限需要审批）
-4. get_limit_status - 查询限额状态（breaches, warnings）
-5. get_asset_allocation - 获取资产配置详情
+1. get_risk_metrics - Get core risk metrics (funded status, surplus, duration gap)
+2. run_stress_test - Run stress test (rate shock, equity shock)
+3. check_hedge_compliance - Check hedge compliance (important: exceeding limit requires approval)
+4. get_limit_status - Query limit status (breaches, warnings)
+5. get_asset_allocation - Get asset allocation details
 
 Rules:
-- If user mentions hedge/hedging/对冲, use check_hedge_compliance
+- If user mentions hedge/hedging, use check_hedge_compliance
 - If user mentions stress/scenario/shock/what-if, use run_stress_test
 - If user mentions limit/breach/warning, use get_limit_status
 - If user mentions allocation/portfolio, use get_asset_allocation
@@ -305,7 +305,7 @@ Respond ONLY with valid JSON, no other text."""
         steps.append(ThinkingStep(
             node="🤖 Tool Selection",
             status="success",
-            message=f"AI 选择工具: {selected_tool}",
+            message=f"AI selected tool: {selected_tool}",
             detail=reasoning,
             tool_call=f"{selected_tool}()",
             tool_params=json.dumps(tool_params, ensure_ascii=False) if tool_params else None,
@@ -323,12 +323,12 @@ Respond ONLY with valid JSON, no other text."""
         steps.append(ThinkingStep(
             node="🤖 Tool Selection",
             status="warning",
-            message=f"AI 选择失败，使用 fallback: {str(e)}",
+            message=f"AI selection failed, using fallback: {str(e)}",
         ))
         
         # 简单 fallback 逻辑
         query_lower = state["user_query"].lower()
-        if "hedge" in query_lower or "对冲" in query_lower:
+        if "hedge" in query_lower:
             selected_tool = "check_hedge_compliance"
             # 尝试提取比例
             import re
@@ -369,7 +369,7 @@ def node_execute_tool(state: AgentState) -> AgentState:
         steps.append(ThinkingStep(
             node="⚙️ Execute",
             status="error",
-            message=f"未知工具: {selected_tool}",
+            message=f"Unknown tool: {selected_tool}",
         ))
         return {**state, "thinking_steps": steps, "tool_output": {}}
     
@@ -404,7 +404,7 @@ def node_execute_tool(state: AgentState) -> AgentState:
         steps.append(ThinkingStep(
             node="⚙️ Execute",
             status="success",
-            message=f"工具执行完成: {TOOL_DESCRIPTIONS.get(selected_tool, selected_tool)}",
+            message=f"Tool executed: {TOOL_DESCRIPTIONS.get(selected_tool, selected_tool)}",
             tool_call=f"{selected_tool}()",
             tool_result=result_summary,
         ))
@@ -419,7 +419,7 @@ def node_execute_tool(state: AgentState) -> AgentState:
         steps.append(ThinkingStep(
             node="⚙️ Execute",
             status="error",
-            message=f"工具执行失败: {str(e)}",
+            message=f"Tool execution failed: {str(e)}",
         ))
         return {**state, "thinking_steps": steps, "tool_output": {}}
 
@@ -434,11 +434,11 @@ def _format_tool_result(tool_name: str, result: dict) -> str:
     elif tool_name == "check_hedge_compliance":
         status = result.get("status", "UNKNOWN")
         ratio = result.get("proposed_ratio", 0)
-        return f"{status} - 建议比例: {ratio:.0%}"
+        return f"{status} - Proposed ratio: {ratio:.0%}"
     elif tool_name == "get_limit_status":
         return f"Breaches: {result.get('breaches', 0)}, Warnings: {result.get('warnings', 0)}"
     elif tool_name == "get_asset_allocation":
-        return f"资产配置详情已获取"
+        return f"Asset allocation retrieved"
     return str(result)[:100]
 
 
@@ -466,14 +466,14 @@ def node_audit(state: AgentState) -> AgentState:
     if selected_tool == "check_hedge_compliance":
         if tool_output.get("status") == "FAIL":
             requires_approval = True
-            approval_reason = tool_output.get("message", "超出合规限额")
+            approval_reason = tool_output.get("message", "Exceeds compliance limit")
             
             steps.append(ThinkingStep(
                 node="🛡️ Audit",
                 status="warning",
-                message="⚠️ 需要人工审批",
+                message="⚠️ Approval Required",
                 detail=approval_reason,
-                tool_result=f"建议调整至: {tool_output.get('recommendation', 0):.0%}",
+                tool_result=f"Recommended: {tool_output.get('recommendation', 0):.0%}",
                 is_warning=True,
                 requires_approval=True,
             ))
@@ -481,16 +481,16 @@ def node_audit(state: AgentState) -> AgentState:
             steps.append(ThinkingStep(
                 node="🛡️ Audit",
                 status="success",
-                message="✅ 合规检查通过",
+                message="✅ Compliance Passed",
                 detail=tool_output.get("message", ""),
             ))
     else:
-        # 非对冲操作，直接通过
+        # Non-hedge operations pass directly
         steps.append(ThinkingStep(
             node="🛡️ Audit",
             status="success",
-            message="✅ 操作无需审批",
-            detail="非高风险操作",
+            message="✅ No Approval Required",
+            detail="Low-risk operation",
         ))
     
     return {
@@ -513,20 +513,20 @@ def node_respond(state: AgentState) -> AgentState:
     # 如果需要审批，生成审批相关响应
     if state.get("requires_approval") and state.get("approval_status") == "pending":
         tool_output = state.get("tool_output", {})
-        response = f"""⚠️ **需要人工审批**
+        response = f"""⚠️ **Approval Required**
 
-您提出的对冲比例 **{tool_output.get('proposed_ratio', 0):.0%}** 超出了合规限额 **{tool_output.get('max_allowed', 0):.0%}**。
+Your proposed hedge ratio **{tool_output.get('proposed_ratio', 0):.0%}** exceeds the compliance limit **{tool_output.get('max_allowed', 0):.0%}**.
 
-**系统建议:** 调整至 **{tool_output.get('recommendation', 0):.0%}**（限额的 95%）
+**System Recommendation:** Adjust to **{tool_output.get('recommendation', 0):.0%}** (95% of limit)
 
-请选择:
-- ✅ **批准** 系统建议的调整
-- ❌ **驳回** 此次操作"""
+Please select:
+- ✅ **Approve** the recommended adjustment
+- ❌ **Reject** this operation"""
         
         steps.append(ThinkingStep(
             node="💬 Respond",
             status="pending",
-            message="等待人工审批",
+            message="Waiting for approval",
             requires_approval=True,
         ))
         
@@ -546,7 +546,7 @@ Tool Used: {selected_tool}
 Tool Output: {json.dumps(tool_output, ensure_ascii=False, indent=2)}
 """
     
-    system_prompt = f"""You are a risk advisor for HOOPP pension fund.
+    system_prompt = f"""You are a risk advisor for a large pension fund.
 
 Based on the tool output below, provide a clear, professional response.
 
@@ -577,11 +577,11 @@ Guidelines:
         steps.append(ThinkingStep(
             node="💬 Respond",
             status="success",
-            message="响应生成完成",
+            message="Response generated",
         ))
         
     except Exception as e:
-        final_response = f"生成响应时出错: {str(e)}"
+        final_response = f"Error generating response: {str(e)}"
         steps.append(ThinkingStep(
             node="💬 Respond",
             status="error",
@@ -616,26 +616,26 @@ def node_handle_approval(state: AgentState) -> AgentState:
         steps.append(ThinkingStep(
             node="✅ Approved",
             status="success",
-            message=f"人工批准：调整至 {new_ratio:.0%}",
-            detail="操作已记录至审计日志",
+            message=f"Approved: adjusted to {new_ratio:.0%}",
+            detail="Action logged to audit trail",
         ))
         
-        response = f"""✅ **操作已批准**
+        response = f"""✅ **Operation Approved**
 
-对冲比例已调整至 **{new_ratio:.0%}**（符合 {tool_output.get('max_allowed', 0):.0%} 限额）
+Hedge ratio adjusted to **{new_ratio:.0%}** (within {tool_output.get('max_allowed', 0):.0%} limit)
 
-此操作已记录至审计日志。"""
+This action has been logged to the audit trail."""
         
     elif approval_status == "rejected":
         steps.append(ThinkingStep(
             node="❌ Rejected",
             status="error",
-            message="人工驳回：操作取消",
+            message="Rejected: operation cancelled",
         ))
         
-        response = """❌ **操作已驳回**
+        response = """❌ **Operation Rejected**
 
-此次对冲调整请求已被取消，当前配置保持不变。"""
+The hedge adjustment request has been cancelled. Current configuration remains unchanged."""
         
     else:
         response = state.get("final_response", "")
