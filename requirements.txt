@@ -3,3 +3,5 @@ pandas
 numpy
 plotly
 openai
+langgraph
+langchain-core pydantic
